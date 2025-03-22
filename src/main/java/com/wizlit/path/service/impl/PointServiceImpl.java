@@ -1,119 +1,102 @@
 package com.wizlit.path.service.impl;
 
-import com.wizlit.path.entity.Edge;
 import com.wizlit.path.entity.Point;
 import com.wizlit.path.exception.ApiException;
-import com.wizlit.path.exception.BusinessLogicException;
-import com.wizlit.path.exception.ErrorCodes;
-import com.wizlit.path.exception.ValidationException;
-import com.wizlit.path.repository.EdgeRepository;
+import com.wizlit.path.exception.ErrorCode;
 import com.wizlit.path.repository.PointRepository;
 import com.wizlit.path.service.PointService;
+import com.wizlit.path.utils.Validator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.util.function.Tuple2;
 import reactor.util.function.Tuples;
 
+import java.util.Arrays;
 import java.util.List;
 
 @Service
 @RequiredArgsConstructor
 public class PointServiceImpl implements PointService {
 
+    /**
+     * Service 규칙:
+     * 1. 1개의 repository 만 정의
+     * 2. repository 의 각 기능은 반드시 한 번만 호출
+     * 3. repository 기능에는 .onErrorMap(error -> Validator.from(error).toException()) 필수
+     */
+
     private final PointRepository pointRepository;
-    private final EdgeRepository edgeRepository;
 
     @Override
-    public Mono<Point> createPoint(Point point) {
-        return pointRepository.save(point);
-    }
+    public Mono<Tuple2<Long, Long>> convertPointsToLong(String originPointId, String destinationPointId) {
+        if (originPointId == null || destinationPointId == null) {
+            return Mono.error(new ApiException(ErrorCode.NULL_POINTS, originPointId, destinationPointId));
+        }
 
-    // get all points
-    @Override
-    public Mono<List<Point>> getAllPoints() {
-        return pointRepository.findAll().collectList();
-    }
-
-    private static final String BACKWARD_PATH_EXISTS_ERROR = "A backward path exists from endPoint to startPoint within %d edges";
-
-    @Override
-    public Mono<Point> addMiddlePoint(String startPoint, String endPoint, Point middlePoint, int depth) {
-        if (startPoint == null || endPoint == null) {
-            throw new ValidationException(ErrorCodes.NULL_PARAMETERS, 0, startPoint, endPoint);
+        if (originPointId.equals(destinationPointId)) {
+            return Mono.error(new ApiException(ErrorCode.SAME_POINTS));
         }
 
         try {
-            Long start = Long.valueOf(startPoint);
-            Long end = Long.valueOf(endPoint);
-
-            if (start.equals(end)) {
-                throw new ValidationException(ErrorCodes.SAME_POINTS);
-            }
-
-            return validatePointsExist(start, end)
-                    .then(checkForBackwardPath(end, start, depth))
-                    .then(createPoint(middlePoint))
-                    .flatMap(savedMiddlePoint -> handleEdges(start, end, savedMiddlePoint))
-                    .onErrorMap(ex -> {
-                        if (ex instanceof ApiException apiException) {
-                            return apiException; // The GlobalExceptionHandler will manage this automatically
-                        }
-                        return new BusinessLogicException(
-                                ErrorCodes.UNKNOWN_ERROR,
-                                "Unexpected error during edge creation - " + ex.getMessage()
-                        );
-                    });
+            Long origin = Long.valueOf(originPointId);
+            Long destination = Long.valueOf(destinationPointId);
+            return Mono.just(Tuples.of(origin, destination));
         } catch (NumberFormatException ex) {
-            throw new ValidationException(ErrorCodes.INVALID_NUMERIC_IDS, 0, startPoint, endPoint);
-//            return Mono.error(new IllegalArgumentException(ErrorCodes.INVALID_NUMERIC_IDS.getMessage()));
+            return Mono.error(new ApiException(ErrorCode.INVALID_NUMERIC_IDS, originPointId, destinationPointId));
         }
     }
 
-    private Mono<Void> validatePointsExist(Long startPointId, Long endPointId) {
-        return pointRepository.existsByIdIn(List.of(startPointId, endPointId))
-                .flatMap(exist -> {
-                    if (!Boolean.TRUE.equals(exist)) {
-                        throw new ValidationException(ErrorCodes.NON_EXISTENT_POINTS, 0, startPointId, endPointId);
-//                        return Mono.error(new IllegalArgumentException(ErrorCodes.NON_EXISTENT_POINTS.getMessage()));
+    @Override
+    public Mono<Point> findExistingPoint(Long id) {
+        return pointRepository.findById(id)
+                .onErrorMap(error -> Validator.from(error)
+                        .containsAllElseError(
+                                new ApiException(ErrorCode.POINT_NOT_FOUND, id),
+                                "point", "not", "found"
+                        )
+                        .toException())
+                .switchIfEmpty(Mono.error(new ApiException(ErrorCode.POINT_NOT_FOUND, id)));
+    }
+
+    @Override
+    public Flux<Point> getAllPoints() {
+        return pointRepository.findAll()
+                .onErrorMap(error -> Validator.from(error)
+                        .toException());
+    }
+
+    @Override
+    public Mono<Point> createPoint(Point point) {
+        return _createPoint(point);
+    }
+
+    private Mono<Point> _createPoint(Point newPoint) {
+        newPoint.setTitle(newPoint.getTitle().trim());
+        if (newPoint.getObjective() != null) newPoint.setObjective(newPoint.getObjective().trim());
+        if (newPoint.getDocument() != null) newPoint.setDocument(newPoint.getDocument().trim());
+
+        return pointRepository.save(newPoint)
+                .onErrorMap(error -> Validator.from(error)
+                        .containsAllElseError(
+                                new ApiException(ErrorCode.POINT_NAME_DUPLICATED, newPoint.getTitle()),
+                                "unique", "key"
+                        )
+                        .toException());
+    }
+
+    // Helper method to check whether both points exist in the repository
+    @Override
+    public Mono<Boolean> validatePointsExist(Long... pointIds) {
+        return pointRepository.existsByIdIn(List.of(pointIds))
+                .onErrorMap(error -> Validator.from(error)
+                        .toException())
+                .flatMap(exists -> {
+                    if (Boolean.FALSE.equals(exists)) {
+                        return Mono.error(new ApiException(ErrorCode.NON_EXISTENT_POINTS, Arrays.toString(pointIds)));
                     }
-                    return Mono.empty();
+                    return Mono.just(true);
                 });
     }
-
-    private Mono<Void> checkForBackwardPath(Long startPointId, Long endPointId, int depth) {
-        return edgeRepository.existsPathWithinDepth(startPointId, endPointId, depth)
-                .flatMap(pathExists -> {
-                    if (Boolean.TRUE.equals(pathExists)) {
-                        throw new BusinessLogicException(ErrorCodes.BACKWARD_PATH, 0, 5);
-//                        return Mono.error(new IllegalArgumentException(ErrorCodes.BACKWARD_PATH_EXISTS.getFormattedMessage(depth)));
-                    }
-                    return Mono.empty();
-                });
-    }
-
-    private Mono<Point> handleEdges(Long startPointId, Long endPointId, Point middlePoint) {
-        Edge newEdgeToMiddle = Edge.builder()
-                .startPoint(startPointId)
-                .endPoint(middlePoint.getId())
-                .build();
-
-        Edge newEdgeFromMiddle = Edge.builder()
-                .startPoint(middlePoint.getId())
-                .endPoint(endPointId)
-                .build();
-
-        return edgeRepository.findByStartPointAndEndPoint(startPointId, endPointId)
-                .flatMap(existingEdge -> edgeRepository.delete(existingEdge)
-                        .then(saveEdgesAndReturnPoint(middlePoint, newEdgeToMiddle, newEdgeFromMiddle)))
-                .switchIfEmpty(saveEdgesAndReturnPoint(middlePoint, newEdgeToMiddle, newEdgeFromMiddle));
-    }
-
-    private Mono<Point> saveEdgesAndReturnPoint(Point middlePoint, Edge edge1, Edge edge2) {
-        return edgeRepository.saveAll(List.of(edge1, edge2))
-                .then(Mono.just(middlePoint))
-                .onErrorMap(error -> {
-                    throw new BusinessLogicException(ErrorCodes.SAVE_FAILED, error.getMessage());
-                });
-    }
-
 }

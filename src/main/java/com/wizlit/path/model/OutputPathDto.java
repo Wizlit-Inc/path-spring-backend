@@ -20,7 +20,7 @@ public class OutputPathDto {
     private List<OutputEdgeDto> edges;
 
     // function: convert from Edge and Point using OutputPointDto>fromPoint, OutputEdgeDto>fromPoint
-    public static OutputPathDto fromEdgesAndPoints(List<Edge> edges, List<Point> points) {
+    public static OutputPathDto fromEdgesAndPoints(List<Point> points, List<Edge> edges) {
         Map<String, OutputPointDto> nodes = points.stream()
                 .map(OutputPointDto::fromPoint)
                 .collect(Collectors.toMap(OutputPointDto::getId, pointDto -> pointDto));

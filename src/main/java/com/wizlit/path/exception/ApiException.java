@@ -1,23 +1,28 @@
 package com.wizlit.path.exception;
 
-import org.springframework.http.HttpStatus;
 import lombok.Getter;
+
+import java.util.Arrays;
+import java.util.List;
 
 @Getter
 public class ApiException extends RuntimeException {
+    private final ErrorCode errorCode;
+    private final Object[] args;
+    private final List<String> stacks;
 
-    private final ErrorCodes errorCode;   // Unique error code (from shared catalog)
-    private final HttpStatus status;       // HTTP status for the error
-
-    public ApiException(ErrorCodes errorCode, HttpStatus status) {
-        super(errorCode.getMessage());
+    private static final String BASE_PACKAGE = ApiException.class.getPackageName().replaceFirst("\\.[^.]+$", "");
+    
+    public ApiException(ErrorCode errorCode, Object... args) {
+        super(String.format(errorCode.getMessage(), args));
         this.errorCode = errorCode;
-        this.status = status;
-    }
-
-    public ApiException(ErrorCodes errorCode, HttpStatus status, String message) {
-        super(message);
-        this.errorCode = errorCode;
-        this.status = status;
+        this.args = args;
+        
+        // Build a list of "FileName:LineNumber" for every stack frame beyond this constructor
+        this.stacks = Arrays.stream(Thread.currentThread().getStackTrace())
+                .skip(2)                                                   // skip getStackTrace & constructor
+                .filter(frame -> frame.getClassName().startsWith(BASE_PACKAGE))
+                .map(frame -> frame.getFileName() + ":" + frame.getLineNumber())
+                .toList();
     }
 }

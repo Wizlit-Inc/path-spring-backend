@@ -1,9 +1,6 @@
 package com.wizlit.path.entity;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
@@ -21,11 +18,13 @@ public class Edge {
     @Column("id")
     private Long id;
 
-    @Column("start_point")
-    private Long startPoint;
+    @NonNull
+    @Column("origin_point")
+    private Long originPoint;
 
-    @Column("end_point")
-    private Long endPoint;
+    @NonNull
+    @Column("destination_point")
+    private Long destinationPoint;
 
     @Column("created_on")
     private Timestamp created_on;

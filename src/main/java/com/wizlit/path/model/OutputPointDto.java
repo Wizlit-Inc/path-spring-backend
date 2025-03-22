@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.sql.Timestamp;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -13,14 +15,18 @@ import lombok.NoArgsConstructor;
 public class OutputPointDto {
     private String id;
     private String title;
+    private String objective;
     private String document;
+    private Timestamp created_on;
 
     // function: convert Point to OutputPointDto
     public static OutputPointDto fromPoint(Point point) {
         return OutputPointDto.builder()
                 .id(point.getId().toString())
                 .title(point.getTitle())
-                .document(point.getDescription())
+                .objective(point.getObjective())
+                .document(point.getDocument())
+                .created_on(point.getCreatedOn())
                 .build();
     }
 }

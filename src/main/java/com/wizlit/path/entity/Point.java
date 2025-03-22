@@ -21,9 +21,12 @@ public class Point {
     @Column("title")
     private String title;
 
-    @Column("description")
-    private String description;
+    @Column("objective")
+    private String objective;
+
+    @Column("document")
+    private String document;
 
     @Column("created_on")
-    private Timestamp created_on;
+    private Timestamp createdOn;
 }

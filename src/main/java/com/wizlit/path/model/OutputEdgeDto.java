@@ -11,15 +11,15 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @Builder
 public class OutputEdgeDto {
-    private String source;
-    private String target;
+    private String origin;
+    private String destination;
     private Boolean trimmed;
 
     // function: convert from Edge
     public static OutputEdgeDto fromEdge(Edge edge) {
         return OutputEdgeDto.builder()
-                .source(edge.getStartPoint().toString())
-                .target(edge.getEndPoint().toString())
+                .origin(edge.getOriginPoint().toString())
+                .destination(edge.getDestinationPoint().toString())
                 .trimmed(Boolean.FALSE) // Default value or modify as required
                 .build();
     }
