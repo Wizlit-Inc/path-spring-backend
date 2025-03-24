@@ -28,8 +28,8 @@ public class ControllerLoggingAspect {
                 log.info("▶▶▶▶▶▶▶▶▶▶ Enter {}", signature);
 
                 return mono
-                        .doOnSuccess(_ -> log.info("◀◀◀◀◀◀◀◀◀◀ Exit {}", signature))
-                        .doFinally(_ -> MDC.remove(RequestContextFilter.REQUEST_ID));
+                        .doOnSuccess(k -> log.info("◀◀◀◀◀◀◀◀◀◀ Exit {}", signature))
+                        .doFinally(s -> MDC.remove(RequestContextFilter.REQUEST_ID));
             });
         }
         if (result instanceof Flux<?> flux) {
@@ -40,7 +40,7 @@ public class ControllerLoggingAspect {
 
                 return flux
                         .doOnComplete(() -> log.info("◀◀◀◀◀◀◀◀◀◀ Exit {}", signature))
-                        .doFinally(_ -> MDC.remove(RequestContextFilter.REQUEST_ID));
+                        .doFinally(s -> MDC.remove(RequestContextFilter.REQUEST_ID));
             });
         }
         return result;

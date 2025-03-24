@@ -52,10 +52,6 @@ public class PointServiceImpl implements PointService {
     public Mono<Point> findExistingPoint(Long id) {
         return pointRepository.findById(id)
                 .onErrorMap(error -> Validator.from(error)
-                        .containsAllElseError(
-                                new ApiException(ErrorCode.POINT_NOT_FOUND, id),
-                                "point", "not", "found"
-                        )
                         .toException())
                 .switchIfEmpty(Mono.error(new ApiException(ErrorCode.POINT_NOT_FOUND, id)));
     }

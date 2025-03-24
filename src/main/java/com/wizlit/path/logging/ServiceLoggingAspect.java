@@ -45,7 +45,7 @@ public class ServiceLoggingAspect {
                         })
                         .doOnSuccess(r -> log.info("◀◀ Mono ◀◀ {} => {}", className, r))
                         .doOnError(e -> log.error("‼ {} failed: {}", className, e.toString()))
-                        .doFinally(_ -> MDC.remove(RequestContextFilter.REQUEST_ID));
+                        .doFinally(s -> MDC.remove(RequestContextFilter.REQUEST_ID));
             });
         }
         else if (result instanceof Flux<?> flux) {
@@ -58,7 +58,7 @@ public class ServiceLoggingAspect {
                             })
                             .doOnNext(r -> log.info("◀◀ Mono ◀◀ {} => {}", className, r))
                             .doOnError(e -> log.error("‼ {} failed: {}", className, e.toString()))
-                            .doFinally(_ -> MDC.remove(RequestContextFilter.REQUEST_ID));
+                            .doFinally(s -> MDC.remove(RequestContextFilter.REQUEST_ID));
                 });
         }
 
