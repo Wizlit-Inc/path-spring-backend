@@ -3,6 +3,7 @@ package com.wizlit.path.logging;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.*;
+import org.slf4j.MDC;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
@@ -34,19 +35,34 @@ public class ServiceLoggingAspect {
         Object[] args = jp.getArgs();
         Object result = jp.proceed();
 
-        if (result instanceof Mono<?>) {
-            return ((Mono<?>) result)
-                    .doOnSubscribe(s -> log.info("▶▶ Mono ▶▶ {} <= {}", className, Arrays.toString(args)))
-                    .doOnSuccess(r -> log.info("◀◀ Mono ◀◀ {} => {}", className, r))
-                    .doOnError(e -> log.error("‼ {} failed: {}", className, e.toString()));
+        if (result instanceof Mono<?> mono) {
+            return Mono.deferContextual(ctx -> {
+                String reqId = ctx.get(RequestContextFilter.REQUEST_ID);
+                return mono
+                        .doOnSubscribe(s -> {
+                            MDC.put(RequestContextFilter.REQUEST_ID, reqId);
+                            log.info("▶▶ Mono ▶▶ {} <= {}", className, Arrays.toString(args));
+                        })
+                        .doOnSuccess(r -> log.info("◀◀ Mono ◀◀ {} => {}", className, r))
+                        .doOnError(e -> log.error("‼ {} failed: {}", className, e.toString()))
+                        .doFinally(_ -> MDC.remove(RequestContextFilter.REQUEST_ID));
+            });
         }
-        else if (result instanceof Flux<?>) {
-            return ((Flux<?>) result)
-                    .doOnSubscribe(s -> log.info("▶▶ Flux ▶▶ {}  <= {}", className, Arrays.toString(args)))
-                    .doOnNext(r -> log.info("◀◀ Flux ◀◀ {} => {}", className, r))
-                    .doOnError(e -> log.error("‼ {} failed: {}", className, e.toString()));
+        else if (result instanceof Flux<?> flux) {
+            return Flux.deferContextual(ctx -> {
+                    String reqId = ctx.get(RequestContextFilter.REQUEST_ID);
+                    return flux
+                            .doOnSubscribe(s -> {
+                                MDC.put(RequestContextFilter.REQUEST_ID, reqId);
+                                log.info("▶▶ Mono ▶▶ {} <= {}", className, Arrays.toString(args));
+                            })
+                            .doOnNext(r -> log.info("◀◀ Mono ◀◀ {} => {}", className, r))
+                            .doOnError(e -> log.error("‼ {} failed: {}", className, e.toString()))
+                            .doFinally(_ -> MDC.remove(RequestContextFilter.REQUEST_ID));
+                });
         }
 
         return result;
     }
+
 }

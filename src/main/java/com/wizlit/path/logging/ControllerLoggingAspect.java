@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
+import org.slf4j.MDC;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
@@ -19,16 +20,30 @@ public class ControllerLoggingAspect {
     public Object logWebFlux(ProceedingJoinPoint jp) throws Throwable {
         String signature = jp.getSignature().toShortString();
         Object result = jp.proceed();
-        if (result instanceof Mono) {
-            return ((Mono<?>) result)
-                    .doOnSubscribe(s -> log.info("▶▶▶▶▶▶▶▶▶▶ Enter {}", signature))
-                    .doFinally(sig -> log.info("◀◀◀◀◀◀◀◀◀◀ Exit {}", signature));
+
+        if (result instanceof Mono<?> mono) {
+            return Mono.deferContextual(ctx -> {
+                String reqId = ctx.get(RequestContextFilter.REQUEST_ID);
+                MDC.put(RequestContextFilter.REQUEST_ID, reqId);
+                log.info("▶▶▶▶▶▶▶▶▶▶ Enter {}", signature);
+
+                return mono
+                        .doOnSuccess(_ -> log.info("◀◀◀◀◀◀◀◀◀◀ Exit {}", signature))
+                        .doFinally(_ -> MDC.remove(RequestContextFilter.REQUEST_ID));
+            });
         }
-        if (result instanceof Flux) {
-            return ((Flux<?>) result)
-                    .doOnSubscribe(s -> log.info("▶▶▶▶▶▶▶▶▶▶ Enter {}", signature))
-                    .doFinally(sig -> log.info("◀◀◀◀◀◀◀◀◀◀ Exit {}", signature));
+        if (result instanceof Flux<?> flux) {
+            return Flux.deferContextual(ctx -> {
+                String reqId = ctx.get(RequestContextFilter.REQUEST_ID);
+                MDC.put(RequestContextFilter.REQUEST_ID, reqId);
+                log.info("▶▶▶▶▶▶▶▶▶▶ Enter {}", signature);
+
+                return flux
+                        .doOnComplete(() -> log.info("◀◀◀◀◀◀◀◀◀◀ Exit {}", signature))
+                        .doFinally(_ -> MDC.remove(RequestContextFilter.REQUEST_ID));
+            });
         }
         return result;
     }
+
 }
