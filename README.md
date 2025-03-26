@@ -1,11 +1,7 @@
 ## Create Docker Spring Image File
 
 ```
-docker build -t {docker-username}/{app-image-name}:{custom-version} -t {docker-username}/{app-image-name}:latest .
-```
-```
-docker push {docker-username}/{app-image-name}:{custom-version}
-docker push {docker-username}/{app-image-name}:latest
+docker build -t {app-image-name}:{custom-version} .
 ```
 
 
@@ -62,4 +58,14 @@ docker run --name {app-container-name} \
 -e PROFILE=dev \
 -p 8080:8080 \
 -d {app-image-name}
+```
+
+## Create Remote Docker Spring Image File
+
+```
+docker build -t {docker-username}/{app-image-name}:{custom-version} -t {docker-username}/{app-image-name}:latest .
+```
+```
+docker push {docker-username}/{app-image-name}:{custom-version}
+docker push {docker-username}/{app-image-name}:latest
 ```
