@@ -16,6 +16,8 @@ public enum ErrorCode {
             "It is a backward path from originPoint to destinationPoint within %d edges - origin: %d, destination: %d"),
 
     // point errors
+    NULL_INPUT(HttpStatus.BAD_REQUEST,
+            "parameter is null"),
     NULL_POINTS(HttpStatus.BAD_REQUEST,
             "Origin and destination parameters must not be null - origin: %d, destination: %d"),
     SAME_POINTS(HttpStatus.BAD_REQUEST,
@@ -33,9 +35,19 @@ public enum ErrorCode {
     EDGE_ALREADY_EXISTS(HttpStatus.BAD_REQUEST,
             "An edge already exists between these points - origin: %d, destination: %d"),
 
+    // drive errors
+    COPY_FAILED(HttpStatus.BAD_REQUEST,
+            "Copy failed: %s"),
+
     // Generic errors
     EMPTY(HttpStatus.BAD_REQUEST,
             "No data to be returned"),
+    INVALID_TOKEN(HttpStatus.UNAUTHORIZED,
+            "Invalid Token"),
+    EXPIRED_TOKEN(HttpStatus.UNAUTHORIZED,
+            "Token expired"),
+    INACCESSIBLE_USER(HttpStatus.FORBIDDEN,
+            "You are not allowed to access this resource - email %s"),
     INTERNAL_SERVER(HttpStatus.INTERNAL_SERVER_ERROR,
             "An unexpected error occurred. - %s"),
     UNKNOWN(HttpStatus.INTERNAL_SERVER_ERROR,

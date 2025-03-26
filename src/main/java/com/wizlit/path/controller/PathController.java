@@ -7,6 +7,8 @@ import com.wizlit.path.model.OutputPointDto;
 import com.wizlit.path.model.OutputPathDto;
 import com.wizlit.path.service.EdgeService;
 import com.wizlit.path.service.PointService;
+import com.wizlit.path.temp.GoogleService;
+import com.wizlit.path.utils.PrivateAccess;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -22,7 +24,7 @@ import reactor.core.publisher.Mono;
 
 @RestController
 @AllArgsConstructor
-@RequestMapping("/path")
+@RequestMapping("/api/path")
 public class PathController {
 
     /**
@@ -32,6 +34,7 @@ public class PathController {
 
     private final PointService pointService;
     private final EdgeService edgeService;
+    private final GoogleService driveService;
 
     private static final Logger log = LoggerFactory.getLogger(PathController.class);
 
@@ -112,6 +115,7 @@ public class PathController {
 
 
     @PostMapping
+    @PrivateAccess
     @Transactional
     @Operation(
             summary = "Add a new point",
@@ -147,14 +151,17 @@ public class PathController {
                     )
             }
     )
-    public Mono<ResponseEntity<OutputPointDto>> addPoint(@RequestBody AddPointDto addPointDto) {
+    public Mono<ResponseEntity<OutputPointDto>> addPoint(
+            @RequestAttribute("token") String token,
+            @RequestBody AddPointDto addPointDto
+    ) {
 
         Point newPoint = AddPointDto.toPoint(addPointDto);
+        Mono<Point> pointMono;
 
         if (addPointDto.getOrigin() == null && addPointDto.getDestination() == null) {
             // Only adding a new point with no connections
-            return pointService.createPoint(newPoint)
-                    .map(_savedPoint -> ResponseEntity.status(HttpStatus.CREATED).body(OutputPointDto.fromPoint(_savedPoint)));
+            pointMono = pointService.createPoint(newPoint);
 
         } else if (addPointDto.getOrigin() == null || addPointDto.getDestination() == null) {
             // Connect point with one edge - validate existence of origin or destination
@@ -162,30 +169,50 @@ public class PathController {
                     ? addPointDto.getOrigin()
                     : addPointDto.getDestination());
 
-            return pointService.findExistingPoint(existingPointId)
+            pointMono = pointService.findExistingPoint(existingPointId)
                     .then(pointService.createPoint(newPoint))
-                    .flatMap(_savedPoint ->
+                    .flatMap(savedPoint ->
                             edgeService.createEdge(
-                                    addPointDto.getOrigin() != null ? Long.valueOf(addPointDto.getOrigin()) : _savedPoint.getId(),
-                                    addPointDto.getDestination() != null ? Long.valueOf(addPointDto.getDestination()) : _savedPoint.getId()
-                            ).then(Mono.just(_savedPoint))
-                    )
-                    .flatMap(_savedPoint -> Mono.just(ResponseEntity.status(HttpStatus.CREATED).body(OutputPointDto.fromPoint(_savedPoint))));
-        } else {
-            return pointService.convertPointsToLong(addPointDto.getOrigin(), addPointDto.getDestination())
-                    .flatMap(_tuple -> {
-                        Long originIdInLong = _tuple.getT1();
-                        Long destinationIdInLong = _tuple.getT2();
+                                    addPointDto.getOrigin() != null ? Long.valueOf(addPointDto.getOrigin()) : savedPoint.getId(),
+                                    addPointDto.getDestination() != null ? Long.valueOf(addPointDto.getDestination()) : savedPoint.getId()
+                            ).thenReturn(savedPoint)
+                    );
 
-                        return edgeService.validateNotBackwardPath(originIdInLong, destinationIdInLong, 5)
+        } else {
+            // Both origin and destination provided: split edge
+            pointMono = pointService.convertPointsToLong(addPointDto.getOrigin(), addPointDto.getDestination())
+                    .flatMap(tuple -> {
+                        Long originId = tuple.getT1();
+                        Long destinationId = tuple.getT2();
+                        return edgeService.validateNotBackwardPath(originId, destinationId, 5)
                                 .then(pointService.createPoint(newPoint))
-                                .flatMap(_savedMiddlePoint ->
-                                        edgeService.splitEdge(originIdInLong, destinationIdInLong, _savedMiddlePoint.getId())
-                                                .then(Mono.just(_savedMiddlePoint))
+                                .flatMap(savedMiddlePoint ->
+                                        edgeService.splitEdge(originId, destinationId, savedMiddlePoint.getId())
+                                                .then(Mono.just(savedMiddlePoint))
                                 );
-                    })
-                    .map(_savedPoint -> ResponseEntity.status(HttpStatus.CREATED).body(OutputPointDto.fromPoint(_savedPoint)));
+                    });
         }
+
+        return pointMono
+                .flatMap(savedPoint -> processDocument(token, savedPoint))
+                .map(updatedPoint -> ResponseEntity.status(HttpStatus.CREATED)
+                        .body(OutputPointDto.fromPoint(updatedPoint)));
+    }
+
+    private Mono<Point> processDocument(String token, Point savedPoint) {
+        if (savedPoint.getDocument() == null) {
+            return driveService.copyDocs(
+                            token,
+                            "16ENglpBm0RpyVEEPLxAJS7K3jmAzBbcn2LnzTTJDlMY",
+                            "1K1BRxA00KcwnDovm5hyTK00QavH-oHvc",
+                            savedPoint.getId() + " // " + savedPoint.getTitle()
+                    )
+                    .flatMap(driveResponse -> {
+                        savedPoint.setDocument("https://docs.google.com/document/d/" + driveResponse.getId());
+                        return pointService.updatePoint(savedPoint);
+                    });
+        }
+        return Mono.just(savedPoint);
     }
 
     /**
@@ -197,6 +224,7 @@ public class PathController {
      * @return a Mono containing the ResponseEntity with the created OutputEdgeDto and a status of HTTP 201 (Created)
      */
     @PostMapping("/connect")
+    @PrivateAccess
     @Transactional
     @Operation(
             summary = "Connect two points",

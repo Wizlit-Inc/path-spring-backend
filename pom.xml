@@ -10,7 +10,7 @@
 	</parent>
 	<groupId>com.wizlit</groupId>
 	<artifactId>path</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
+	<version>ALPHA-0.0.11-SNAPSHOT</version>
 	<name>path</name>
 	<description>Demo project for Spring Boot</description>
 	<url/>

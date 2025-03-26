@@ -48,6 +48,20 @@ public class PointServiceImpl implements PointService {
         }
     }
 
+    // Helper method to check whether both points exist in the repository
+    @Override
+    public Mono<Boolean> validatePointsExist(Long... pointIds) {
+        return pointRepository.existsByIdIn(List.of(pointIds))
+                .onErrorMap(error -> Validator.from(error)
+                        .toException())
+                .flatMap(exists -> {
+                    if (Boolean.FALSE.equals(exists)) {
+                        return Mono.error(new ApiException(ErrorCode.NON_EXISTENT_POINTS, Arrays.toString(pointIds)));
+                    }
+                    return Mono.just(true);
+                });
+    }
+
     @Override
     public Mono<Point> findExistingPoint(Long id) {
         return pointRepository.findById(id)
@@ -65,10 +79,21 @@ public class PointServiceImpl implements PointService {
 
     @Override
     public Mono<Point> createPoint(Point point) {
-        return _createPoint(point);
+        // todo already existing point
+        return _savePoint(point);
     }
 
-    private Mono<Point> _createPoint(Point newPoint) {
+    @Override
+    public Mono<Point> updatePoint(Point updatePoint) {
+        // todo point not existing?
+        if (updatePoint.getId() == null) {
+            return Mono.error(new ApiException(ErrorCode.NULL_INPUT));
+        }
+
+        return _savePoint(updatePoint);
+    }
+
+    private Mono<Point> _savePoint(Point newPoint) {
         newPoint.setTitle(newPoint.getTitle().trim());
         if (newPoint.getObjective() != null) newPoint.setObjective(newPoint.getObjective().trim());
         if (newPoint.getDocument() != null) newPoint.setDocument(newPoint.getDocument().trim());
@@ -80,19 +105,5 @@ public class PointServiceImpl implements PointService {
                                 "unique", "key"
                         )
                         .toException());
-    }
-
-    // Helper method to check whether both points exist in the repository
-    @Override
-    public Mono<Boolean> validatePointsExist(Long... pointIds) {
-        return pointRepository.existsByIdIn(List.of(pointIds))
-                .onErrorMap(error -> Validator.from(error)
-                        .toException())
-                .flatMap(exists -> {
-                    if (Boolean.FALSE.equals(exists)) {
-                        return Mono.error(new ApiException(ErrorCode.NON_EXISTENT_POINTS, Arrays.toString(pointIds)));
-                    }
-                    return Mono.just(true);
-                });
     }
 }

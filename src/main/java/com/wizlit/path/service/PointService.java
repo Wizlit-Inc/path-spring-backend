@@ -10,5 +10,6 @@ public interface PointService {
     Mono<Point> findExistingPoint(Long id);
     Flux<Point> getAllPoints();
     Mono<Point> createPoint(Point point);
+    Mono<Point> updatePoint(Point point);
     Mono<Boolean> validatePointsExist(Long... pointIds);
 }
