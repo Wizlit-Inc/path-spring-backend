@@ -27,7 +27,7 @@ public class PointServiceImpl implements PointService {
      * 3. repository 기능에는 .onErrorMap(error -> Validator.from(error).toException()) 필수
      */
 
-    private final PointRepository pointRepository;
+    private final PointRepository repository;
 
     @Override
     public Mono<Tuple2<Long, Long>> convertPointsToLong(String originPointId, String destinationPointId) {
@@ -51,7 +51,7 @@ public class PointServiceImpl implements PointService {
     // Helper method to check whether both points exist in the repository
     @Override
     public Mono<Boolean> validatePointsExist(Long... pointIds) {
-        return pointRepository.existsByIdIn(List.of(pointIds))
+        return repository.existsByIdIn(List.of(pointIds))
                 .onErrorMap(error -> Validator.from(error)
                         .toException())
                 .flatMap(exists -> {
@@ -64,7 +64,7 @@ public class PointServiceImpl implements PointService {
 
     @Override
     public Mono<Point> findExistingPoint(Long id) {
-        return pointRepository.findById(id)
+        return repository.findById(id)
                 .onErrorMap(error -> Validator.from(error)
                         .toException())
                 .switchIfEmpty(Mono.error(new ApiException(ErrorCode.POINT_NOT_FOUND, id)));
@@ -72,7 +72,7 @@ public class PointServiceImpl implements PointService {
 
     @Override
     public Flux<Point> getAllPoints() {
-        return pointRepository.findAll()
+        return repository.findAll()
                 .onErrorMap(error -> Validator.from(error)
                         .toException());
     }
@@ -98,7 +98,7 @@ public class PointServiceImpl implements PointService {
         if (newPoint.getObjective() != null) newPoint.setObjective(newPoint.getObjective().trim());
         if (newPoint.getDocument() != null) newPoint.setDocument(newPoint.getDocument().trim());
 
-        return pointRepository.save(newPoint)
+        return repository.save(newPoint)
                 .onErrorMap(error -> Validator.from(error)
                         .containsAllElseError(
                                 new ApiException(ErrorCode.POINT_NAME_DUPLICATED, newPoint.getTitle()),

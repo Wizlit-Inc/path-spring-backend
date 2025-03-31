@@ -26,7 +26,7 @@ public class EdgeServiceImpl implements EdgeService {
      * 3. repository 기능에는 .onErrorMap(error -> Validator.from(error).toException()) 필수
      */
 
-    private final EdgeRepository edgeRepository;
+    private final EdgeRepository repository;
 
     // get all edges that are related to input points
     @Override
@@ -35,7 +35,7 @@ public class EdgeServiceImpl implements EdgeService {
                 .map(Point::getId)
                 .filter(Objects::nonNull)
                 .toList();
-        return edgeRepository.findAllByPointIdIn(pointIds)
+        return repository.findAllByPointIdIn(pointIds)
                 .onErrorMap(error -> Validator.from(error)
                         .toException());
     }
@@ -51,7 +51,7 @@ public class EdgeServiceImpl implements EdgeService {
     }
 
     private Mono<Edge> _validateOrGetEdgeExists(Long originPointId, Long destinationPointId, Boolean throwException) {
-        return edgeRepository.findByOriginPointAndDestinationPoint(originPointId, destinationPointId)
+        return repository.findByOriginPointAndDestinationPoint(originPointId, destinationPointId)
                 .onErrorMap(error -> Validator.from(error)
                         .toException())
                 .flatMap(existingEdge -> {
@@ -69,7 +69,7 @@ public class EdgeServiceImpl implements EdgeService {
     // Helper method to check for backward paths between the points
     @Override
     public Mono<Boolean> validateNotBackwardPath(Long originPointId, Long destinationPointId, int depth) {
-        return edgeRepository.existsPathWithinDepth(destinationPointId, originPointId, depth)
+        return repository.existsPathWithinDepth(destinationPointId, originPointId, depth)
                 .onErrorMap(error -> Validator.from(error)
                         .toException())
                 .flatMap(backwardPathExists -> {
@@ -121,13 +121,13 @@ public class EdgeServiceImpl implements EdgeService {
     }
 
     private Mono<Edge> _createEdge(Edge newEdge) {
-        return edgeRepository.save(newEdge)
+        return repository.save(newEdge)
                 .onErrorMap(error -> Validator.from(error)
                         .toException());
     }
 
     private Flux<Edge> _createEdge(Edge... newEdges) {
-        return edgeRepository.saveAll(List.of(newEdges))
+        return repository.saveAll(List.of(newEdges))
                 .onErrorMap(error -> Validator.from(error)
                         .toException());
     }
@@ -149,7 +149,7 @@ public class EdgeServiceImpl implements EdgeService {
     }
 
     private Mono<Void> _deleteEdge(Edge edge) {
-        return edgeRepository.delete(edge)
+        return repository.delete(edge)
                 .onErrorMap(error -> Validator.from(error)
                         .toException());
     }

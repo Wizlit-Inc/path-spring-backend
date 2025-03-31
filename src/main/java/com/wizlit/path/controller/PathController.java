@@ -1,26 +1,22 @@
 package com.wizlit.path.controller;
 
-import com.wizlit.path.model.AddPointDto;
-import com.wizlit.path.entity.Point;
-import com.wizlit.path.model.OutputEdgeDto;
-import com.wizlit.path.model.OutputPointDto;
-import com.wizlit.path.model.OutputPathDto;
+import com.wizlit.path.model.*;
 import com.wizlit.path.service.EdgeService;
+import com.wizlit.path.service.LastUpdateService;
 import com.wizlit.path.service.PointService;
-import com.wizlit.path.temp.GoogleService;
 import com.wizlit.path.utils.PrivateAccess;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import lombok.AllArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
+
+import java.time.Instant;
 
 @RestController
 @AllArgsConstructor
@@ -34,38 +30,8 @@ public class PathController {
 
     private final PointService pointService;
     private final EdgeService edgeService;
-    private final GoogleService driveService;
+    private final LastUpdateService lastUpdateService;
 
-    private static final Logger log = LoggerFactory.getLogger(PathController.class);
-
-    @GetMapping("/{pointId}")
-    @Operation(
-            summary = "Get a point and its details",
-            description = "Retrieve a point by its ID using edgeService. Converts the result into an OutputPointDto.",
-            tags = {"Path Management"},
-            responses = {
-                    @ApiResponse(
-                            responseCode = "200",
-                            description = "Successfully retrieved the point",
-                            content = @Content(
-                                    schema = @Schema(implementation = OutputPointDto.class)
-                            )
-                    ),
-                    @ApiResponse(
-                            responseCode = "404",
-                            description = "Point not found"
-                    ),
-                    @ApiResponse(
-                            responseCode = "500",
-                            description = "An internal server error occurred"
-                    )
-            }
-    )
-    public Mono<ResponseEntity<OutputPointDto>> getPoint(@PathVariable Long pointId) {
-        return pointService.findExistingPoint(pointId)
-                .map(point -> ResponseEntity.ok(OutputPointDto.fromPoint(point)));
-    }
-    
     /**
      * Retrieves all points and their associated edges from the system.
      * If no points are available, it returns a ResponseEntity with a no-content status.
@@ -100,119 +66,17 @@ public class PathController {
                     )
             }
     )
-    public Mono<ResponseEntity<OutputPathDto>> getAllPointsAndEdges() {
+    public Mono<ResponseWithTimestamp<OutputPathDto>> getAllPointsAndEdges() {
         return pointService.getAllPoints()
                 .collectList()
                 .flatMap(points -> {
                     if (points.isEmpty()) {
-                        return Mono.just(ResponseEntity.ok(OutputPathDto.builder().build()));
+                        return Mono.just(new ResponseWithTimestamp<>(OutputPathDto.builder().build()));
                     }
                     return edgeService.getAllEdgesByPoints(points)
                             .collectList()
-                            .map(edges -> ResponseEntity.ok(OutputPathDto.fromEdgesAndPoints(points, edges)));
+                            .map(edges -> new ResponseWithTimestamp<>(OutputPathDto.fromEdgesAndPoints(points, edges)));
                 });
-    }
-
-
-    @PostMapping
-    @PrivateAccess
-    @Transactional
-    @Operation(
-            summary = "Add a new point",
-            description = "Adds a new point to the system. " +
-                    "Returns a bad request status if invalid input is provided, or an internal server error status in case of processing errors.",
-            tags = {"Path Management"},
-            responses = {
-                    @ApiResponse(
-                            responseCode = "201",
-                            description = "Successfully created a new point",
-                            content = @Content(
-                                    schema = @Schema(implementation = OutputPointDto.class)
-                            )
-                    ),
-                    @ApiResponse(
-                            responseCode = "400",
-                            description = "Bad request due to invalid input. Possible error codes:\n" +
-                                    "- **NULL_PARAMETERS**: Input data contains null values\n" +
-                                    "- **INVALID_NUMERIC_IDS**: Provided ID is invalid or non-numeric\n" +
-                                    "- **SAME_POINTS**: Start point and end point cannot be the same\n" +
-                                    "- **NON_EXISTENT_POINTS**: Either the startPoint or endPoint does not exist"
-                    ),
-                    @ApiResponse(
-                            responseCode = "409",
-                            description = "Conflict occurred while processing the request. Possible error codes:\n" +
-                                    "- **BACKWARD_PATH**: A backward path exists from endPoint to startPoint within X edges\n"
-                    ),
-                    @ApiResponse(
-                            responseCode = "500",
-                            description = "An internal server error occurred while processing the request. Possible error codes:\n" +
-                                    "- **ERR_INTERNAL**: An unexpected error occurred. Please try again later\n" +
-                                    "- **ERR_UNKNOWN**: An unspecified error occurred"
-                    )
-            }
-    )
-    public Mono<ResponseEntity<OutputPointDto>> addPoint(
-            @RequestAttribute("token") String token,
-            @RequestBody AddPointDto addPointDto
-    ) {
-
-        Point newPoint = AddPointDto.toPoint(addPointDto);
-        Mono<Point> pointMono;
-
-        if (addPointDto.getOrigin() == null && addPointDto.getDestination() == null) {
-            // Only adding a new point with no connections
-            pointMono = pointService.createPoint(newPoint);
-
-        } else if (addPointDto.getOrigin() == null || addPointDto.getDestination() == null) {
-            // Connect point with one edge - validate existence of origin or destination
-            Long existingPointId = Long.valueOf(addPointDto.getOrigin() != null
-                    ? addPointDto.getOrigin()
-                    : addPointDto.getDestination());
-
-            pointMono = pointService.findExistingPoint(existingPointId)
-                    .then(pointService.createPoint(newPoint))
-                    .flatMap(savedPoint ->
-                            edgeService.createEdge(
-                                    addPointDto.getOrigin() != null ? Long.valueOf(addPointDto.getOrigin()) : savedPoint.getId(),
-                                    addPointDto.getDestination() != null ? Long.valueOf(addPointDto.getDestination()) : savedPoint.getId()
-                            ).thenReturn(savedPoint)
-                    );
-
-        } else {
-            // Both origin and destination provided: split edge
-            pointMono = pointService.convertPointsToLong(addPointDto.getOrigin(), addPointDto.getDestination())
-                    .flatMap(tuple -> {
-                        Long originId = tuple.getT1();
-                        Long destinationId = tuple.getT2();
-                        return edgeService.validateNotBackwardPath(originId, destinationId, 5)
-                                .then(pointService.createPoint(newPoint))
-                                .flatMap(savedMiddlePoint ->
-                                        edgeService.splitEdge(originId, destinationId, savedMiddlePoint.getId())
-                                                .then(Mono.just(savedMiddlePoint))
-                                );
-                    });
-        }
-
-        return pointMono
-                .flatMap(savedPoint -> processDocument(token, savedPoint))
-                .map(updatedPoint -> ResponseEntity.status(HttpStatus.CREATED)
-                        .body(OutputPointDto.fromPoint(updatedPoint)));
-    }
-
-    private Mono<Point> processDocument(String token, Point savedPoint) {
-        if (savedPoint.getDocument() == null) {
-            return driveService.copyDocs(
-                            token,
-                            "16ENglpBm0RpyVEEPLxAJS7K3jmAzBbcn2LnzTTJDlMY",
-                            "1K1BRxA00KcwnDovm5hyTK00QavH-oHvc",
-                            savedPoint.getId() + " // " + savedPoint.getTitle()
-                    )
-                    .flatMap(driveResponse -> {
-                        savedPoint.setDocument("https://docs.google.com/document/d/" + driveResponse.getId());
-                        return pointService.updatePoint(savedPoint);
-                    });
-        }
-        return Mono.just(savedPoint);
     }
 
     /**
@@ -273,6 +137,22 @@ public class PathController {
                             .then(edgeService.validateNotBackwardPath(originIdInLong, destinationIdInLong, 5))
                             .then(edgeService.createEdge(originIdInLong, destinationIdInLong));
                 })
+                .flatMap(_saved -> lastUpdateService.update("path").thenReturn(_saved))
                 .map(_edge -> ResponseEntity.status(HttpStatus.CREATED).body(OutputEdgeDto.fromEdge(_edge)));
     }
+
+    @GetMapping("/changed")
+    @Operation(
+            summary = ""
+    )
+    public Mono<ResponseWithTimestamp<Boolean>> isChanged(
+            @RequestParam Long timestamp
+    ) {
+        if (timestamp == 0) {
+            return Mono.just(new ResponseWithTimestamp<>(false));
+        }
+        return lastUpdateService.hasUpdate("path", Instant.ofEpochMilli(timestamp))
+                .map(ResponseWithTimestamp::new);
+    }
+
 }
