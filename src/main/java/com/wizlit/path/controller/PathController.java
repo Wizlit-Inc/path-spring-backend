@@ -45,7 +45,6 @@ public class PathController {
             summary = "Get all points and related edges",
             description = "Fetch all points along with their connected edges from the system. " +
                     "Returns a no-content status if no points are available, or an internal server error status in case of processing errors.",
-            tags = {"Path Management"},
             responses = {
                     @ApiResponse(
                             responseCode = "200",
@@ -87,15 +86,14 @@ public class PathController {
      * @param destination the ending point of the edge to be created
      * @return a Mono containing the ResponseEntity with the created OutputEdgeDto and a status of HTTP 201 (Created)
      */
-    @PostMapping("/connect")
+    @PutMapping
     @PrivateAccess
     @Transactional
     @Operation(
             summary = "Connect two points",
             description = "Creates a connection (edge) between two existing points in the system. " +
                     "Returns a bad request status if invalid input is provided, a conflict status if connection-related rules are violated, or an internal server error status for unexpected issues.",
-            tags = {"Path Management"},
-            responses = {
+                    responses = {
                     @ApiResponse(
                             responseCode = "200",
                             description = "Successfully connected the two points",
@@ -139,6 +137,58 @@ public class PathController {
                 })
                 .flatMap(_saved -> lastUpdateService.update("path").thenReturn(_saved))
                 .map(_edge -> ResponseEntity.status(HttpStatus.CREATED).body(OutputEdgeDto.fromEdge(_edge)));
+    }
+
+    /**
+     * Disconnects two points by deleting the edge between them.
+     * 
+     * @param origin      the starting point of the edge to be deleted
+     * @param destination the ending point of the edge to be deleted
+     * @return a Mono containing the ResponseEntity with the deleted OutputEdgeDto and a status of HTTP 200 (OK)
+     */
+    @DeleteMapping
+    @PrivateAccess
+    @Transactional
+    @Operation(
+            summary = "Disconnect two points",
+            description = "Deletes the edge between the specified origin and destination points in the system. " +
+                    "Returns a bad request status if invalid input is provided, or an internal server error status for unexpected issues.",
+            responses = {
+                    @ApiResponse(
+                            responseCode = "200",
+                            description = "Successfully disconnected the two points",
+                            content = @Content(
+                                    schema = @Schema(implementation = OutputEdgeDto.class)
+                            )
+                    ),
+                    @ApiResponse(
+                            responseCode = "400",
+                            description = "Bad request due to invalid input. Possible error codes:\n" +
+                                    "- **NULL_PARAMETERS**: One or more input parameters are null\n" +
+                                    "- **INVALID_NUMERIC_IDS**: The provided point IDs are invalid or non-numeric\n" +
+                                    "- **NON_EXISTENT_POINTS**: Either the origin or destination point does not exist in the system"
+                    ),
+                    @ApiResponse(
+                            responseCode = "500",
+                            description = "An internal server error occurred while processing the request. Possible error codes:\n" +
+                                    "- **ERR_INTERNAL**: An unexpected error occurred. Please try again later\n" +
+                                    "- **ERR_UNKNOWN**: An unspecified error occurred\n" +
+                                    "- **ERR_INVALID_INPUT**: Invalid input provided"
+                    )
+            }
+    )
+    public Mono<ResponseEntity<OutputEdgeDto>> disconnectTwoPoints(@RequestParam String origin, @RequestParam String destination) {
+        return pointService.convertPointsToLong(origin, destination)
+                .flatMap(tuple -> {
+                    Long originIdInLong = tuple.getT1();
+                    Long destinationIdInLong = tuple.getT2();
+
+                    return edgeService.findExistingEdge(originIdInLong, destinationIdInLong)
+                            .flatMap(edge -> edgeService.deleteEdge(edge)
+                                    .then(Mono.just(edge)));
+                })
+                .flatMap(_edge -> lastUpdateService.update("path").thenReturn(_edge))
+                .map(edge -> ResponseEntity.ok(OutputEdgeDto.fromEdge(edge)));
     }
 
     @GetMapping("/changed")

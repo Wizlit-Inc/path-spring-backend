@@ -57,4 +57,22 @@ public class GoogleService {
                         .toException());
     }
 
+    public Mono<GoogleDriveFileResponse> updateFileName(String accessToken, String fileId, String newName) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("name", newName);
+        
+        return driveClient.patch()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/files/{fileId}")
+                        .queryParam("supportsAllDrives", "true")
+                        .queryParam("fields", "id,name")
+                        .build(fileId))
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .header(HttpHeaders.CONTENT_TYPE, "application/json")
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(GoogleDriveFileResponse.class)
+                .onErrorMap(error -> Validator.from(error)
+                        .toException());
+    }
 }

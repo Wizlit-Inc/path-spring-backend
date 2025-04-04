@@ -40,7 +40,6 @@ public class PointController {
             summary = "Add a new point",
             description = "Adds a new point to the system. " +
                     "Returns a bad request status if invalid input is provided, or an internal server error status in case of processing errors.",
-            tags = {"Path Management"},
             responses = {
                     @ApiResponse(
                             responseCode = "201",
@@ -126,6 +125,7 @@ public class PointController {
                             "16ENglpBm0RpyVEEPLxAJS7K3jmAzBbcn2LnzTTJDlMY",
                             "1K1BRxA00KcwnDovm5hyTK00QavH-oHvc",
                             savedPoint.getId() + " // " + savedPoint.getTitle()
+                        //     String.valueOf(savedPoint.getId()) // + " // " + savedPoint.getTitle()
                     )
                     .flatMap(driveResponse -> {
                         savedPoint.setDocument("https://docs.google.com/document/d/" + driveResponse.getId());
@@ -139,7 +139,6 @@ public class PointController {
     @Operation(
             summary = "Get a point and its details",
             description = "Retrieve a point by its ID using edgeService. Converts the result into an OutputPointDto.",
-            tags = {"Path Management"},
             responses = {
                     @ApiResponse(
                             responseCode = "200",
@@ -161,6 +160,52 @@ public class PointController {
     public Mono<ResponseWithTimestamp<OutputPointDto>> getPoint(@PathVariable Long pointId) {
         return pointService.findExistingPoint(pointId)
                 .map(point -> new ResponseWithTimestamp<>(OutputPointDto.fromPoint(point)));
+    }
+    
+    @PutMapping("/{pointId}")
+    @PrivateAccess
+    @Transactional
+    @Operation(
+            summary = "Update a point",
+            description = "Updates a point by its ID using pointService. Converts the result into an OutputPointDto.",
+            responses = {
+                    @ApiResponse(
+                            responseCode = "200",
+                            description = "Successfully updated the point",
+                            content = @Content(schema = @Schema(implementation = OutputPointDto.class))
+                    ),
+                    @ApiResponse(
+                            responseCode = "404",
+                            description = "Point not found"
+                    ),
+                    @ApiResponse(
+                            responseCode = "500",
+                            description = "An internal server error occurred"
+                    )
+            }
+    )
+    public Mono<ResponseWithTimestamp<OutputPointDto>> updatePoint(
+            @RequestAttribute("token") String token,
+            @PathVariable String pointId, 
+            @RequestBody UpdatePointDto updatePointDto
+    ) {
+        Point point = updatePointDto.toPoint(pointId);
+
+        return pointService.updatePoint(point)
+                .flatMap(existingPoint -> {
+                    String title = updatePointDto.getTitle();
+                    String documentUrl = existingPoint.getDocument();
+
+                    // If title is being updated and document exists, update Google Drive file name
+                    if (title != null && documentUrl != null) {
+                        // Extract file ID from Google Docs URL
+                        String fileId = documentUrl.substring(documentUrl.lastIndexOf("/") + 1);
+                        return driveService.updateFileName(token, fileId, pointId + " // " + title).thenReturn(existingPoint);
+                    }
+                    return Mono.just(existingPoint);
+                })
+                .flatMap(_saved -> lastUpdateService.update("path").thenReturn(_saved))
+                .map(updatedPoint -> new ResponseWithTimestamp<>(OutputPointDto.fromPoint(updatedPoint)));
     }
 
 }

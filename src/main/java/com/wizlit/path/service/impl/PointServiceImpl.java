@@ -85,12 +85,17 @@ public class PointServiceImpl implements PointService {
 
     @Override
     public Mono<Point> updatePoint(Point updatePoint) {
-        // todo point not existing?
         if (updatePoint.getId() == null) {
             return Mono.error(new ApiException(ErrorCode.NULL_INPUT));
         }
 
-        return _savePoint(updatePoint);
+        return findExistingPoint(updatePoint.getId())
+               .flatMap(existingPoint -> {
+                    if (updatePoint.getTitle() != null) existingPoint.setTitle(updatePoint.getTitle());
+                    if (updatePoint.getObjective() != null) existingPoint.setObjective(updatePoint.getObjective());
+                    if (updatePoint.getDocument() != null) existingPoint.setDocument(updatePoint.getDocument());
+                    return _savePoint(existingPoint);
+                });
     }
 
     private Mono<Point> _savePoint(Point newPoint) {
