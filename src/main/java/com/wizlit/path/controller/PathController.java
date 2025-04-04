@@ -193,7 +193,7 @@ public class PathController {
 
     @GetMapping("/changed")
     @Operation(
-            summary = ""
+            summary = "check change"
     )
     public Mono<ResponseWithTimestamp<Boolean>> isChanged(
             @RequestParam Long timestamp
