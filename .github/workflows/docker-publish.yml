@@ -25,7 +25,7 @@ jobs:
       - name: Extract version from pom.xml
         id: version
         run: |
-          VERSION=$(grep -oP '<version>\K[^<]+' pom.xml | tail -n 1)
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           echo "version<<EOF" >> $GITHUB_OUTPUT
           echo "$VERSION" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
