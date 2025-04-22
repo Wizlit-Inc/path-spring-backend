@@ -17,6 +17,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
+import org.springframework.beans.factory.annotation.Value;
 
 @RestController
 @AllArgsConstructor
@@ -32,6 +33,9 @@ public class PointController {
     private final EdgeService edgeService;
     private final LastUpdateService lastUpdateService;
     private final GoogleService driveService;
+    
+    @Value("${app.googledrive.folderId}")
+    private String googleDriveFolderId;
 
     @PostMapping
     @PrivateAccess
@@ -123,9 +127,8 @@ public class PointController {
             return driveService.copyDocs(
                             token,
                             "16ENglpBm0RpyVEEPLxAJS7K3jmAzBbcn2LnzTTJDlMY",
-                            "1K1BRxA00KcwnDovm5hyTK00QavH-oHvc",
+                            googleDriveFolderId,
                             savedPoint.getId() + " // " + savedPoint.getTitle()
-                        //     String.valueOf(savedPoint.getId()) // + " // " + savedPoint.getTitle()
                     )
                     .flatMap(driveResponse -> {
                         savedPoint.setDocument("https://docs.google.com/document/d/" + driveResponse.getId());
