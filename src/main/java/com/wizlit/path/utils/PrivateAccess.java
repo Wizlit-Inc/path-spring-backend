@@ -10,4 +10,6 @@ import java.lang.annotation.Target;
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 @SecurityRequirement(name = "Authorization")
-public @interface PrivateAccess {}
+public @interface PrivateAccess {
+    String role() default "";
+}

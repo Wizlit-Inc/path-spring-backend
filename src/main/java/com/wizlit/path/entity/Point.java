@@ -2,31 +2,50 @@ package com.wizlit.path.entity;
 
 import lombok.*;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
 import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 
-import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.List;
 
 @Data
-@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Table("point") // create if not exists or update if there is any changes made on application starts
+@Builder
+@Table("point")
 public class Point {
     @Id
-    @Column("id")
-    private Long id; // auto generate string id
+    @Column("point_id") 
+    private Long pointId;
 
-    @NonNull
-    @Column("title")
-    private String title;
+    @Column("point_title")
+    private String pointTitle;
 
-    @Column("objective")
-    private String objective;
+    @Column("point_created_user")
+    private Long pointCreatedUser;
 
-    @Column("document")
-    private String document;
+    @Column("point_summary")
+    private String pointSummary; // ai summary of all memo summary. update on memoSummaryTimestamp n days ago
 
-    @Column("created_on")
-    private Timestamp createdOn;
+    @Column("point_summary_timestamp")
+    private Instant pointSummaryTimestamp; // if memo update was happened because of summary, update this together
+
+    @Column("point_created_timestamp")
+    private Instant pointCreatedTimestamp;
+
+    @Column("point_updated_timestamp")
+    private Instant pointUpdatedTimestamp; // Point updated, PointMemo updated
+
+    // Transient field to store memo IDs in order
+    @Transient
+    private List<Long> memoIdsInOrder;
+
+    public List<Long> getMemoIdsInOrder() {
+        return memoIdsInOrder;
+    }
+
+    public void setMemoIdsInOrder(List<Long> memoIdsInOrder) {
+        this.memoIdsInOrder = memoIdsInOrder;
+    }
 }

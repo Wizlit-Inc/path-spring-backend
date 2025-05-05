@@ -11,7 +11,7 @@ import reactor.core.publisher.Mono;
 import java.util.Collection;
 
 @Repository
-public interface EdgeRepository extends ReactiveCrudRepository<Edge, Long> {
+public interface EdgeRepository extends ReactiveCrudRepository<Edge, Edge.EdgeId> {
     // You can add custom query methods, e.g.,
     // Flux<User> findByName(String name);
     
@@ -33,4 +33,6 @@ public interface EdgeRepository extends ReactiveCrudRepository<Edge, Long> {
 
     @Query("SELECT * FROM edge WHERE origin_point IN (:points) OR destination_point IN (:points)")
     Flux<Edge> findAllByPointIdIn(@Param("points") Collection<Long> points);
+
+    Mono<Void> deleteByOriginPointAndDestinationPoint(Long originPoint, Long destinationPoint);
 }

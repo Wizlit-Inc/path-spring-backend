@@ -1,214 +1,330 @@
 package com.wizlit.path.controller;
 
-import com.wizlit.path.entity.Point;
 import com.wizlit.path.model.*;
-import com.wizlit.path.service.EdgeService;
-import com.wizlit.path.service.LastUpdateService;
+import com.wizlit.path.model.domain.EdgeDto;
+import com.wizlit.path.model.request.AddPointRequest;
+import com.wizlit.path.model.request.UpdatePointRequest;
+import com.wizlit.path.model.response.FinalResponse;
 import com.wizlit.path.service.PointService;
-import com.wizlit.path.temp.GoogleService;
+import com.wizlit.path.service.MemoService;
+import com.wizlit.path.service.UserService;
 import com.wizlit.path.utils.PrivateAccess;
+import com.wizlit.path.exception.ErrorResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
-import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 import org.springframework.beans.factory.annotation.Value;
 
+import java.time.Instant;
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.util.Objects;
+
+import com.wizlit.path.model.domain.PointDto;
+import com.wizlit.path.model.domain.MemoDto;
+
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/point")
+@Tag(name = "Point", description = "Point management APIs")
 public class PointController {
 
     /**
      * Controller 규칙:
-     * 1. repository 직접 호출 X (service 만 호출)
+     * 1. service 만 호출
      */
 
     private final PointService pointService;
-    private final EdgeService edgeService;
-    private final LastUpdateService lastUpdateService;
-    private final GoogleService driveService;
-    
+    private final MemoService memoService;
+    private final UserService userService;
+
     @Value("${app.googledrive.folderId}")
     private String googleDriveFolderId;
 
+    @Operation(
+        summary = "Add a new point",
+        description = "Creates a new point in the project with the specified title and connections"
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "201", description = "Point created successfully"),
+        @ApiResponse(responseCode = "400", description = "Invalid input parameters (ErrorCode: NULL_INPUT, NULL_POINTS, SAME_POINTS, INVALID_NUMERIC_IDS, EMPTY)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "401", description = "Unauthorized access (ErrorCode: INVALID_TOKEN, EXPIRED_TOKEN)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "403", description = "Forbidden - Admin access required (ErrorCode: INACCESSIBLE_USER)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "404", description = "Project not found (ErrorCode: PROJECT_NOT_FOUND)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "409", description = "Point title already exists (ErrorCode: POINT_NAME_DUPLICATED)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "500", description = "Internal server error (ErrorCode: INTERNAL_SERVER, UNKNOWN)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class)))
+    })
     @PostMapping
     @PrivateAccess
-    @Transactional
-    @Operation(
-            summary = "Add a new point",
-            description = "Adds a new point to the system. " +
-                    "Returns a bad request status if invalid input is provided, or an internal server error status in case of processing errors.",
-            responses = {
-                    @ApiResponse(
-                            responseCode = "201",
-                            description = "Successfully created a new point",
-                            content = @Content(
-                                    schema = @Schema(implementation = OutputPointDto.class)
-                            )
-                    ),
-                    @ApiResponse(
-                            responseCode = "400",
-                            description = "Bad request due to invalid input. Possible error codes:\n" +
-                                    "- **NULL_PARAMETERS**: Input data contains null values\n" +
-                                    "- **INVALID_NUMERIC_IDS**: Provided ID is invalid or non-numeric\n" +
-                                    "- **SAME_POINTS**: Start point and end point cannot be the same\n" +
-                                    "- **NON_EXISTENT_POINTS**: Either the startPoint or endPoint does not exist"
-                    ),
-                    @ApiResponse(
-                            responseCode = "409",
-                            description = "Conflict occurred while processing the request. Possible error codes:\n" +
-                                    "- **BACKWARD_PATH**: A backward path exists from endPoint to startPoint within X edges\n"
-                    ),
-                    @ApiResponse(
-                            responseCode = "500",
-                            description = "An internal server error occurred while processing the request. Possible error codes:\n" +
-                                    "- **ERR_INTERNAL**: An unexpected error occurred. Please try again later\n" +
-                                    "- **ERR_UNKNOWN**: An unspecified error occurred"
-                    )
-            }
-    )
-    public Mono<ResponseEntity<OutputPointDto>> addPoint(
-            @RequestAttribute("token") String token,
-            @RequestBody AddPointDto addPointDto
+    public Mono<ResponseEntity<ResponseWithChange<FinalResponse>>> addPoint(
+            @RequestAttribute("email") String email,
+            @RequestAttribute("name") String name,
+            @RequestAttribute("avatar") String avatar,
+            @RequestBody AddPointRequest addPointRequest
     ) {
-
-        Point newPoint = AddPointDto.toPoint(addPointDto);
-        Mono<Point> pointMono;
-
-        if (addPointDto.getOrigin() == null && addPointDto.getDestination() == null) {
-            // Only adding a new point with no connections
-            pointMono = pointService.createPoint(newPoint);
-
-        } else if (addPointDto.getOrigin() == null || addPointDto.getDestination() == null) {
-            // Connect point with one edge - validate existence of origin or destination
-            Long existingPointId = Long.valueOf(addPointDto.getOrigin() != null
-                    ? addPointDto.getOrigin()
-                    : addPointDto.getDestination());
-
-            pointMono = pointService.findExistingPoint(existingPointId)
-                    .then(pointService.createPoint(newPoint))
-                    .flatMap(savedPoint ->
-                            edgeService.createEdge(
-                                    addPointDto.getOrigin() != null ? Long.valueOf(addPointDto.getOrigin()) : savedPoint.getId(),
-                                    addPointDto.getDestination() != null ? Long.valueOf(addPointDto.getDestination()) : savedPoint.getId()
-                            ).thenReturn(savedPoint)
-                    );
-
-        } else {
-            // Both origin and destination provided: split edge
-            pointMono = pointService.convertPointsToLong(addPointDto.getOrigin(), addPointDto.getDestination())
-                    .flatMap(tuple -> {
-                        Long originId = tuple.getT1();
-                        Long destinationId = tuple.getT2();
-                        return edgeService.validateNotBackwardPath(originId, destinationId, 5)
-                                .then(pointService.createPoint(newPoint))
-                                .flatMap(savedMiddlePoint ->
-                                        edgeService.splitEdge(originId, destinationId, savedMiddlePoint.getId())
-                                                .then(Mono.just(savedMiddlePoint))
-                                );
-                    });
-        }
-
-        return pointMono
-                .flatMap(savedPoint -> processDocument(token, savedPoint))
-                .flatMap(_saved -> lastUpdateService.update("path").thenReturn(_saved))
-                .map(updatedPoint -> ResponseEntity.status(HttpStatus.CREATED)
-                        .body(OutputPointDto.fromPoint(updatedPoint)));
+        return userService.getUserByEmailAndCreateIfNotExists(email, name, avatar)
+            .flatMap(user -> pointService.createPoint(
+                addPointRequest.getProjectId(),
+                user,
+                addPointRequest.getTitle(),
+                addPointRequest.getOrigin(),
+                addPointRequest.getDestination()
+            ))
+            .map(point -> new FinalResponse().forOnlyPoint(point))
+            .map(ResponseWithChange::new)
+            .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.CREATED));
     }
 
-    private Mono<Point> processDocument(String token, Point savedPoint) {
-        if (savedPoint.getDocument() == null) {
-            return driveService.copyDocs(
-                            token,
-                            "16ENglpBm0RpyVEEPLxAJS7K3jmAzBbcn2LnzTTJDlMY",
-                            googleDriveFolderId,
-                            savedPoint.getId() + " // " + savedPoint.getTitle()
-                    )
-                    .flatMap(driveResponse -> {
-                        savedPoint.setDocument("https://docs.google.com/document/d/" + driveResponse.getId());
-                        return pointService.updatePoint(savedPoint);
-                    });
-        }
-        return Mono.just(savedPoint);
-    }
-
-    @GetMapping("/{pointId}")
     @Operation(
-            summary = "Get a point and its details",
-            description = "Retrieve a point by its ID using edgeService. Converts the result into an OutputPointDto.",
-            responses = {
-                    @ApiResponse(
-                            responseCode = "200",
-                            description = "Successfully retrieved the point",
-                            content = @Content(
-                                    schema = @Schema(implementation = OutputPointDto.class)
-                            )
-                    ),
-                    @ApiResponse(
-                            responseCode = "404",
-                            description = "Point not found"
-                    ),
-                    @ApiResponse(
-                            responseCode = "500",
-                            description = "An internal server error occurred"
-                    )
-            }
+        summary = "Get point details",
+        description = "Retrieves details of a specific point including its memos and contributors"
     )
-    public Mono<ResponseWithTimestamp<OutputPointDto>> getPoint(@PathVariable Long pointId) {
-        return pointService.findExistingPoint(pointId)
-                .map(point -> new ResponseWithTimestamp<>(OutputPointDto.fromPoint(point)));
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Successfully retrieved point details"),
+        @ApiResponse(responseCode = "400", description = "Invalid input parameters (ErrorCode: NULL_INPUT, EMPTY)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "401", description = "Unauthorized access (ErrorCode: INVALID_TOKEN, EXPIRED_TOKEN)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "404", description = "Point not found (ErrorCode: POINT_NOT_FOUND)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "500", description = "Internal server error (ErrorCode: INTERNAL_SERVER, UNKNOWN)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/{pointId}")
+    public Mono<ResponseEntity<ResponseWithChange<FinalResponse>>> getPoint(
+        @PathVariable Long pointId,
+        @RequestParam(required = false) Long lastFetchTimestamp
+    ) {
+        Instant updatedAfter = lastFetchTimestamp != null ? Instant.ofEpochMilli(lastFetchTimestamp) : null;
+        return Mono.zip(
+            pointService.getPoint(pointId, updatedAfter),
+            memoService.listMemosByPointId(pointId, updatedAfter).collectList()
+        )
+        .flatMap(tuple -> {
+            PointDto point = tuple.getT1();
+            List<MemoDto> memos = tuple.getT2();
+            
+            List<Long> allUserIds = Stream.<Long>concat(
+                Stream.empty(),
+                // Stream.of(point.getPointCreatedUser()),
+                memos.stream()
+                    .flatMap(memo -> Stream.concat(
+                        Stream.of(memo.getMemoCreatedUser()),
+                        memo.getContributorUserIds() != null ? 
+                            memo.getContributorUserIds().stream() : 
+                            Stream.empty()
+                    ))
+            ).filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+            
+            return userService.listUserByUserIds(allUserIds, updatedAfter)
+                .collectList()
+                .map(users -> new FinalResponse().forGetPoint(point, memos, users));
+        })
+        .switchIfEmpty(Mono.just(new FinalResponse()))
+        .map(ResponseWithChange::new)
+        .map(response -> response.toResponseEntity(HttpStatus.OK));
     }
     
+    @Operation(
+        summary = "Update point title",
+        description = "Updates the title of an existing point"
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Point updated successfully"),
+        @ApiResponse(responseCode = "400", description = "Invalid input parameters (ErrorCode: NULL_INPUT, EMPTY)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "401", description = "Unauthorized access (ErrorCode: INVALID_TOKEN, EXPIRED_TOKEN)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "403", description = "Forbidden - Admin access required (ErrorCode: INACCESSIBLE_USER)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "404", description = "Point not found (ErrorCode: POINT_NOT_FOUND)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "409", description = "Point title already exists (ErrorCode: POINT_NAME_DUPLICATED)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "500", description = "Internal server error (ErrorCode: INTERNAL_SERVER, UNKNOWN)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class)))
+    })
     @PutMapping("/{pointId}")
     @PrivateAccess
-    @Transactional
-    @Operation(
-            summary = "Update a point",
-            description = "Updates a point by its ID using pointService. Converts the result into an OutputPointDto.",
-            responses = {
-                    @ApiResponse(
-                            responseCode = "200",
-                            description = "Successfully updated the point",
-                            content = @Content(schema = @Schema(implementation = OutputPointDto.class))
-                    ),
-                    @ApiResponse(
-                            responseCode = "404",
-                            description = "Point not found"
-                    ),
-                    @ApiResponse(
-                            responseCode = "500",
-                            description = "An internal server error occurred"
-                    )
-            }
-    )
-    public Mono<ResponseWithTimestamp<OutputPointDto>> updatePoint(
-            @RequestAttribute("token") String token,
-            @PathVariable String pointId, 
-            @RequestBody UpdatePointDto updatePointDto
+    public Mono<ResponseEntity<ResponseWithChange<FinalResponse>>> updatePoint(
+            @PathVariable Long pointId, 
+            @RequestBody UpdatePointRequest updatePointRequest
     ) {
-        Point point = updatePointDto.toPoint(pointId);
-
-        return pointService.updatePoint(point)
-                .flatMap(existingPoint -> {
-                    String title = updatePointDto.getTitle();
-                    String documentUrl = existingPoint.getDocument();
-
-                    // If title is being updated and document exists, update Google Drive file name
-                    if (title != null && documentUrl != null) {
-                        // Extract file ID from Google Docs URL
-                        String fileId = documentUrl.substring(documentUrl.lastIndexOf("/") + 1);
-                        return driveService.updateFileName(token, fileId, pointId + " // " + title).thenReturn(existingPoint);
-                    }
-                    return Mono.just(existingPoint);
-                })
-                .flatMap(_saved -> lastUpdateService.update("path").thenReturn(_saved))
-                .map(updatedPoint -> new ResponseWithTimestamp<>(OutputPointDto.fromPoint(updatedPoint)));
+        return pointService.updatePoint(pointId, updatePointRequest.getTitle())
+            .map(point -> new FinalResponse().forOnlyPoint(point))
+            .map(ResponseWithChange::new)
+            .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.OK));
     }
+
+    @Operation(
+        summary = "Delete point",
+        description = "Deletes a point from the project (Admin only)"
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Point deleted successfully"),
+        @ApiResponse(responseCode = "400", description = "Point cannot be deleted (ErrorCode: POINT_NOT_DELETABLE, EMPTY)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "401", description = "Unauthorized access (ErrorCode: INVALID_TOKEN, EXPIRED_TOKEN)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "403", description = "Forbidden - Admin access required (ErrorCode: INACCESSIBLE_USER)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "404", description = "Point not found (ErrorCode: POINT_NOT_FOUND)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "500", description = "Internal server error (ErrorCode: INTERNAL_SERVER, UNKNOWN)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @DeleteMapping("/{pointId}")
+    @PrivateAccess(role = "admin")
+    public Mono<ResponseEntity<ResponseWithChange<Void>>> deletePoint(
+        @PathVariable Long pointId
+    ) {
+        return pointService.deletePoint(pointId)
+            .map(ResponseWithChange::new)
+            .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.OK));
+    }
+
+    /**
+     * Connects two points by creating an edge between the specified origin and destination.
+     * The connection is assigned a default weight of 5.
+     *
+     * @pathVariable origin      the starting point of the edge to be created
+     * @pathVariable destination the ending point of the edge to be created
+     * @return a Mono containing the ResponseEntity with the created OutputEdgeDto and a status of HTTP 201 (Created)
+     */
+    @Operation(
+        summary = "Connect two points",
+        description = "Creates an edge between two points with a default weight of 5"
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "201", description = "Points connected successfully"),
+        @ApiResponse(responseCode = "400", description = "Invalid input parameters (ErrorCode: NULL_INPUT, NULL_POINTS, SAME_POINTS, INVALID_NUMERIC_IDS, BACKWARD_PATH, EMPTY)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "401", description = "Unauthorized access (ErrorCode: INVALID_TOKEN, EXPIRED_TOKEN)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "403", description = "Forbidden - Admin access required (ErrorCode: INACCESSIBLE_USER)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "404", description = "One or both points not found (ErrorCode: NON_EXISTENT_POINTS)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "409", description = "Edge already exists (ErrorCode: EDGE_ALREADY_EXISTS)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "500", description = "Internal server error (ErrorCode: INTERNAL_SERVER, UNKNOWN)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PutMapping("/{originPointId}/point/{destinationPointId}")
+    @PrivateAccess
+    public Mono<ResponseEntity<ResponseWithChange<EdgeDto>>> connectTwoPoints(
+        @PathVariable Long originPointId,
+        @PathVariable Long destinationPointId
+    ) {
+        return pointService.connectPoints(originPointId, destinationPointId)
+                .map(ResponseWithChange::new)
+                .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.CREATED));
+    }
+
+    /**
+     * Disconnects two points by deleting the edge between them.
+     * 
+     * @pathVariable origin      the starting point of the edge to be deleted
+     * @pathVariable destination the ending point of the edge to be deleted
+     * @return a Mono containing the ResponseEntity with the deleted OutputEdgeDto and a status of HTTP 200 (OK)
+     */
+    @Operation(
+        summary = "Disconnect two points",
+        description = "Removes the edge between two points"
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Points disconnected successfully"),
+        @ApiResponse(responseCode = "400", description = "Invalid input parameters (ErrorCode: NULL_INPUT, NULL_POINTS, SAME_POINTS, INVALID_NUMERIC_IDS, EMPTY)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "401", description = "Unauthorized access (ErrorCode: INVALID_TOKEN, EXPIRED_TOKEN)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "403", description = "Forbidden - Admin access required (ErrorCode: INACCESSIBLE_USER)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "404", description = "One or both points not found (ErrorCode: NON_EXISTENT_POINTS)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "500", description = "Internal server error (ErrorCode: INTERNAL_SERVER, UNKNOWN)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @DeleteMapping("/{originPointId}/point/{destinationPointId}")
+    @PrivateAccess
+    public Mono<ResponseEntity<ResponseWithChange<Void>>> disconnectTwoPoints(
+        @PathVariable Long originPointId,
+        @PathVariable Long destinationPointId
+    ) {
+        return pointService.disconnectPoints(originPointId, destinationPointId)
+            .map(ResponseWithChange::new)
+            .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.OK));
+    }
+
+    
+    // .flatMap(updatedPoint -> {
+    //     // if updatedPoint type is googledocs, get altContent as documentUrl
+
+    //     String title = updatePointDto.getTitle();
+    //     String documentUrl = existingPoint.getDocument();
+
+    //     // If title is being updated and document exists, update Google Drive file name
+    //     if (title != null && documentUrl != null) {
+    //         // Extract file ID from Google Docs URL
+    //         String fileId = documentUrl.substring(documentUrl.lastIndexOf("/") + 1);
+    //         return driveService.updateFileName(token, fileId, pointId + " // " + title).thenReturn(existingPoint);
+    //     }
+    //     return Mono.just(existingPoint);
+    // })
+    // .flatMap(_saved -> lastUpdateService.update("path").thenReturn(_saved))
+    // .map(updatedPoint -> new ResponseWithChange<>(
+    //         OutputPointDto.fromPoint(updatedPoint),
+    //         true,
+    //         updatedPoint.getUpdatedOn().getTime()
+    // ));
 
 }

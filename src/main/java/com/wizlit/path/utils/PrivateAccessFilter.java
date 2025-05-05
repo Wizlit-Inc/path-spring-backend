@@ -34,14 +34,19 @@ public class PrivateAccessFilter implements WebFilter {
             "/swagger-ui", "/swagger-ui/", "/v3/api-docs", "/swagger-resources", "/webjars/"
     );
 
+    private static final String DEVELOPER_EMAIL = "admin@wizlit.com";
+    private static final String ADMIN_EMAIL = "admin@wizlit.com";
+
     private final RequestMappingHandlerMapping handlerMapping;
     private final Set<String> allowedEmails;
     private final ObjectMapper mapper = new ObjectMapper();
     private final GoogleService googleService;
+    private final boolean developerMode;
 
     public PrivateAccessFilter(
             @Qualifier("requestMappingHandlerMapping") RequestMappingHandlerMapping handlerMapping,
             @Value("${app.privateAccess.allowedEmails}") String emails,
+            @Value("${app.developerMode:false}") boolean developerMode,
             GoogleService googleService
     ) {
         this.handlerMapping = handlerMapping;
@@ -50,6 +55,7 @@ public class PrivateAccessFilter implements WebFilter {
                 .filter(s -> !s.isEmpty())
                 .collect(Collectors.toSet());
         this.googleService = googleService;
+        this.developerMode = developerMode;
     }
 
     @Override
@@ -69,7 +75,20 @@ public class PrivateAccessFilter implements WebFilter {
         return handlerMapping.getHandler(exchange)
                 .cast(HandlerMethod.class)
                 .flatMap(handlerMethod -> {
-                    if (handlerMethod.getMethod().isAnnotationPresent(PrivateAccess.class)) {
+                    PrivateAccess privateAccess = handlerMethod.getMethod().getAnnotation(PrivateAccess.class);
+                    
+                    if (privateAccess != null) {
+                        if (developerMode) {
+                            // In developer mode, check if admin role is required
+                            if ("admin".equals(privateAccess.role()) && !DEVELOPER_EMAIL.equals(ADMIN_EMAIL)) {
+                                return Mono.error(new ApiException(ErrorCode.INACCESSIBLE_USER));
+                            }
+                            exchange.getAttributes().put("email", DEVELOPER_EMAIL);
+                            exchange.getAttributes().put("name", "Developer");
+                            exchange.getAttributes().put("avatar", "https://picsum.photos/200");
+                            exchange.getAttributes().put("token", "developer-mode-token");
+                            return chain.filter(exchange);
+                        }
                         return authenticate(exchange, chain);
                     } else {
                         return chain.filter(exchange);
@@ -99,10 +118,12 @@ public class PrivateAccessFilter implements WebFilter {
                     try {
                         JsonNode userInfo = mapper.readTree(json);
                         String email = userInfo.path("email").asText(null);
+                        String name = userInfo.path("name").asText(null);
+                        String avatar = userInfo.path("picture").asText(null);
                         if (email == null) {
                             return Mono.error(new ApiException(ErrorCode.INVALID_TOKEN));
                         }
-                        return validateAndProceed(email, token, exchange, chain);
+                        return validateAndProceed(email, name, avatar, token, exchange, chain);
                     } catch (IOException e) {
                         return Mono.error(new ApiException(ErrorCode.INVALID_TOKEN, e));
                     }
@@ -125,19 +146,33 @@ public class PrivateAccessFilter implements WebFilter {
                 return Mono.error(new ApiException(ErrorCode.EXPIRED_TOKEN));
             }
             String email = payload.get("email").asText();
-            return validateAndProceed(email, token, exchange, chain);
+            String name = payload.path("name").asText(null);
+            String avatar = payload.path("picture").asText(null);
+            return validateAndProceed(email, name, avatar, token, exchange, chain);
         } catch (IOException | IllegalArgumentException e) {
             return Mono.error(new ApiException(ErrorCode.INVALID_TOKEN, e));
         }
     }
 
-    private Mono<Void> validateAndProceed(String email, String token, ServerWebExchange exchange, WebFilterChain chain) {
+    private Mono<Void> validateAndProceed(String email, String name, String avatar, String token, ServerWebExchange exchange, WebFilterChain chain) {
         if (!allowedEmails.contains("*") && !allowedEmails.contains(email)) {
-            return Mono.error(new ApiException(ErrorCode.INACCESSIBLE_USER, email));
+            return Mono.error(new ApiException(ErrorCode.INACCESSIBLE_USER));
         }
-        exchange.getAttributes().put("email", email);
-        exchange.getAttributes().put("token", token);
-        return chain.filter(exchange);
+
+        // Get the handler method to check for admin role
+        return handlerMapping.getHandler(exchange)
+                .cast(HandlerMethod.class)
+                .flatMap(handlerMethod -> {
+                    PrivateAccess privateAccess = handlerMethod.getMethod().getAnnotation(PrivateAccess.class);
+                    if (privateAccess != null && "admin".equals(privateAccess.role()) && !ADMIN_EMAIL.equals(email)) {
+                        return Mono.error(new ApiException(ErrorCode.INACCESSIBLE_USER));
+                    }
+                    exchange.getAttributes().put("email", email);
+                    exchange.getAttributes().put("name", name);
+                    exchange.getAttributes().put("avatar", avatar);
+                    exchange.getAttributes().put("token", token);
+                    return chain.filter(exchange);
+                });
     }
 
 //    private Mono<Void> authenticate(ServerWebExchange exchange, WebFilterChain chain) {

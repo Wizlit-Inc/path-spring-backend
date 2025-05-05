@@ -1,19 +1,22 @@
 package com.wizlit.path.service.impl;
 
 import com.wizlit.path.entity.Point;
-import com.wizlit.path.exception.ApiException;
-import com.wizlit.path.exception.ErrorCode;
-import com.wizlit.path.repository.PointRepository;
+import com.wizlit.path.model.domain.EdgeDto;
+import com.wizlit.path.model.domain.PointDto;
+import com.wizlit.path.model.domain.UserDto;
 import com.wizlit.path.service.PointService;
-import com.wizlit.path.utils.Validator;
+import com.wizlit.path.service.manager.EdgeManager;
+import com.wizlit.path.service.manager.PointManager;
+import com.wizlit.path.service.manager.ProjectManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.util.function.Tuple2;
-import reactor.util.function.Tuples;
 
-import java.util.Arrays;
+import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 
 @Service
@@ -22,93 +25,112 @@ public class PointServiceImpl implements PointService {
 
     /**
      * Service 규칙:
-     * 1. 1개의 repository 만 정의
-     * 2. repository 의 각 기능은 반드시 한 번만 호출
-     * 3. repository 기능에는 .onErrorMap(error -> Validator.from(error).toException()) 필수
+     * 1. repository 직접 호출 X (helper 를 통해서만 호출 - 동일한 helper 가 다른 곳에서도 쓰여도 됨)
      */
-
-    private final PointRepository repository;
-
+    
+    private final ProjectManager projectManager;
+    private final PointManager pointManager;
+    private final EdgeManager edgeManager;
+    
     @Override
-    public Mono<Tuple2<Long, Long>> convertPointsToLong(String originPointId, String destinationPointId) {
-        if (originPointId == null || destinationPointId == null) {
-            return Mono.error(new ApiException(ErrorCode.NULL_POINTS, originPointId, destinationPointId));
-        }
-
-        if (originPointId.equals(destinationPointId)) {
-            return Mono.error(new ApiException(ErrorCode.SAME_POINTS));
-        }
-
-        try {
-            Long origin = Long.valueOf(originPointId);
-            Long destination = Long.valueOf(destinationPointId);
-            return Mono.just(Tuples.of(origin, destination));
-        } catch (NumberFormatException ex) {
-            return Mono.error(new ApiException(ErrorCode.INVALID_NUMERIC_IDS, originPointId, destinationPointId));
-        }
-    }
-
-    // Helper method to check whether both points exist in the repository
-    @Override
-    public Mono<Boolean> validatePointsExist(Long... pointIds) {
-        return repository.existsByIdIn(List.of(pointIds))
-                .onErrorMap(error -> Validator.from(error)
-                        .toException())
-                .flatMap(exists -> {
-                    if (Boolean.FALSE.equals(exists)) {
-                        return Mono.error(new ApiException(ErrorCode.NON_EXISTENT_POINTS, Arrays.toString(pointIds)));
-                    }
-                    return Mono.just(true);
-                });
+    public Flux<PointDto> listPointsByIds(List<Long> ids, Instant updatedAfter) {
+        return pointManager.getFullPoints(ids, updatedAfter);
     }
 
     @Override
-    public Mono<Point> findExistingPoint(Long id) {
-        return repository.findById(id)
-                .onErrorMap(error -> Validator.from(error)
-                        .toException())
-                .switchIfEmpty(Mono.error(new ApiException(ErrorCode.POINT_NOT_FOUND, id)));
+    public Mono<PointDto> getPoint(Long id, Instant updatedAfter) {
+        return pointManager.getFullPoint(id, updatedAfter);
     }
 
+    @Transactional
     @Override
-    public Flux<Point> getAllPoints() {
-        return repository.findAll()
-                .onErrorMap(error -> Validator.from(error)
-                        .toException());
+    public Mono<PointDto> createPoint(
+        Long projectId,
+        UserDto user,
+        String title,
+        Long originPointId,
+        Long destinationPointId
+    ) {
+        Point newPoint = Point.builder()
+            .pointTitle(title)
+            .pointCreatedUser(user.getUserId())
+            .build();
+        
+        return projectManager.isProjectExists(projectId, true)
+            .then(Mono.<Point>defer(() -> {
+                if (originPointId == null && destinationPointId == null) {
+                    // Only adding a new point with no connections
+                    return pointManager.createPoint(newPoint);
+                    
+                } else if (originPointId == null || destinationPointId == null) {
+                    // Connect point with one edge - validate existence of origin or destination
+                    Long existingPointId = originPointId != null ? originPointId : destinationPointId;
+                    return pointManager.validatePointsExist(existingPointId)
+                        .then(pointManager.createPoint(newPoint))
+                        .flatMap(savedPoint ->
+                            edgeManager.createEdge(
+                                originPointId != null ? originPointId : savedPoint.getPointId(),
+                                destinationPointId != null ? destinationPointId : savedPoint.getPointId()
+                            ).then(Mono.just(savedPoint))
+                        );
+
+                } else {
+                    // Both origin and destination provided: split edge
+                    return edgeManager.validateNoBackwardPath(originPointId, destinationPointId, 5)
+                        .then(pointManager.createPoint(newPoint))
+                        .flatMap(savedMiddlePoint ->
+                            edgeManager.splitEdge(originPointId, destinationPointId, savedMiddlePoint.getPointId())
+                                .then(Mono.just(savedMiddlePoint))
+                        );
+                }
+            }))
+            .flatMap(savedPoint -> 
+                projectManager.addPointToProject(projectId, savedPoint.getPointId())
+                    .then(Mono.just(PointDto.from(savedPoint, Collections.emptyList())))
+            );
     }
 
+    @Transactional
     @Override
-    public Mono<Point> createPoint(Point point) {
-        // todo already existing point
-        return _savePoint(point);
+    public Mono<EdgeDto> connectPoints(Long originPointId, Long destinationPointId) {
+        return edgeManager.validateEdgeDoesNotExist(originPointId, destinationPointId)
+            .then(pointManager.validatePointsExist(originPointId, destinationPointId))
+            .then(edgeManager.validateNoBackwardPath(originPointId, destinationPointId, 5))
+            .then(edgeManager.createEdge(originPointId, destinationPointId))
+            .map(edge -> EdgeDto.fromEdge(edge));
     }
 
+    @Transactional
     @Override
-    public Mono<Point> updatePoint(Point updatePoint) {
-        if (updatePoint.getId() == null) {
-            return Mono.error(new ApiException(ErrorCode.NULL_INPUT));
-        }
-
-        return findExistingPoint(updatePoint.getId())
-               .flatMap(existingPoint -> {
-                    if (updatePoint.getTitle() != null) existingPoint.setTitle(updatePoint.getTitle());
-                    if (updatePoint.getObjective() != null) existingPoint.setObjective(updatePoint.getObjective());
-                    if (updatePoint.getDocument() != null) existingPoint.setDocument(updatePoint.getDocument());
-                    return _savePoint(existingPoint);
-                });
+    public Mono<Void> disconnectPoints(Long originPointId, Long destinationPointId) {
+        return edgeManager.deleteEdgeByPoints(originPointId, destinationPointId);
     }
 
-    private Mono<Point> _savePoint(Point newPoint) {
-        newPoint.setTitle(newPoint.getTitle().trim());
-        if (newPoint.getObjective() != null) newPoint.setObjective(newPoint.getObjective().trim());
-        if (newPoint.getDocument() != null) newPoint.setDocument(newPoint.getDocument().trim());
-
-        return repository.save(newPoint)
-                .onErrorMap(error -> Validator.from(error)
-                        .containsAllElseError(
-                                new ApiException(ErrorCode.POINT_NAME_DUPLICATED, newPoint.getTitle()),
-                                "unique", "key"
-                        )
-                        .toException());
+    @Transactional
+    @Override
+    public Mono<PointDto> updatePoint(Long pointId, String title) {
+        return pointManager.updatePoint(pointId, title, null)
+            .flatMap(point -> pointManager.getFullPoint(point.getPointId(), null));
     }
+
+    @Transactional
+    @Override
+    public Mono<Void> deletePoint(Long pointId) {
+        return pointManager.deletePoint(pointId);
+    }
+
+    @Transactional
+    @Override
+    public Mono<Void> moveMemo(Long currentPointId, Long memoId, Long newPointId) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'moveMemo'");
+    }
+
+    @Transactional
+    @Override
+    public Mono<PointDto> reorderMemo(Long pointId, Long memoId, Long newPosition) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'reorderMemo'");
+    }
+    
 }
