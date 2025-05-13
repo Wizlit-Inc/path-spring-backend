@@ -20,6 +20,7 @@ public interface MemoRepository extends R2dbcRepository<Memo, Long> {
         "m.memo_title AS memo_title, " +
         "m.memo_type AS memo_type, " +
         "m.memo_summary AS memo_summary, " +
+        "m.memo_embed_content AS memo_embed_content, " +
         "(EXTRACT(EPOCH FROM m.memo_summary_timestamp) * 1000)::bigint AS memo_summary_timestamp, " +
         "(EXTRACT(EPOCH FROM m.memo_created_timestamp) * 1000)::bigint AS memo_created_timestamp, " +
         "(EXTRACT(EPOCH FROM GREATEST(m.memo_updated_timestamp, COALESCE(d.draft_updated_timestamp, m.memo_updated_timestamp))) * 1000)::bigint AS memo_updated_timestamp, " +

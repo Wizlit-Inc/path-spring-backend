@@ -12,6 +12,8 @@ import com.wizlit.path.model.domain.ProjectDto;
 import com.wizlit.path.model.domain.EdgeDto;
 import reactor.core.publisher.Mono;
 
+import java.util.Objects;
+
 @Service
 @RequiredArgsConstructor
 public class ProjectServiceImpl implements ProjectService {
@@ -31,9 +33,15 @@ public class ProjectServiceImpl implements ProjectService {
         }
         
         return projectManager.getFullProjectById(projectId)
-                .flatMap(projectDto -> edgeManager.findEdgesByPointIds(projectDto.getPointIds())
-                    .map(EdgeDto::fromEdge)
-                    .collectList()
-                    .map(edges -> projectDto.append(projectDto.getPointIds(), edges)));
+                .flatMap(projectDto -> {
+                    if (projectDto == null) {
+                        return Mono.error(new ApiException(ErrorCode.PROJECT_NOT_FOUND, projectId));
+                    }
+
+                    return edgeManager.findEdgesByPointIds(projectDto.getPointIds())
+                            .map(EdgeDto::fromEdge)
+                            .collectList()
+                            .map(edges -> projectDto.append(projectDto.getPointIds(), edges));
+                });
     }
 }

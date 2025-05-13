@@ -48,6 +48,8 @@ public class EdgeManager {
      * @return A Flux of edges connected to the specified points
      */
     public Flux<Edge> findEdgesByPointIds(List<Long> pointIds) {
+        if (pointIds == null || pointIds.isEmpty()) return Flux.empty();
+
         return edgeRepository.findAllByPointIdIn(pointIds)
             .onErrorMap(error -> Validator.from(error)
                 .containsAllElseError(

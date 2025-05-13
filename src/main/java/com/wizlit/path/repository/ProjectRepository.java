@@ -32,7 +32,7 @@ public interface ProjectRepository extends ReactiveCrudRepository<Project, Long>
       "  p.project_created_user                                 AS project_created_user, " +
       "  (EXTRACT(EPOCH FROM p.project_created_timestamp) * 1000)::bigint AS project_created_timestamp, " +
       "  (EXTRACT(EPOCH FROM p.project_updated_timestamp) * 1000)::bigint AS project_updated_timestamp, " +
-      "  COALESCE(ARRAY_AGG(pp.point_id ORDER BY pp.point_id), ARRAY[]::bigint[]) AS point_ids " +
+      "  COALESCE(ARRAY_AGG(pp.point_id ORDER BY pp.point_id) FILTER (WHERE pp.point_id IS NOT NULL), ARRAY[]::bigint[]) AS point_ids " +
       "FROM project p " +
       "LEFT JOIN project_point pp ON p.project_id = pp.project_id " +
       "WHERE p.project_id IN (:ids) " +

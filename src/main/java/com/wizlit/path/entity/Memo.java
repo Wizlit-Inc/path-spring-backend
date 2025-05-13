@@ -6,8 +6,6 @@ import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 import org.springframework.data.annotation.Transient;
 
-import com.wizlit.path.entity.vo.MemoType;
-
 import java.time.Instant;
 
 @Data
@@ -25,9 +23,6 @@ public class Memo {
 
     @Column("memo_title")
     private String memoTitle;
-
-    @Column("memo_type")
-    private MemoType memoType; // type cannot be changed
 
     @Column("memo_summary")
     private String memoSummary; // ai summary of memo latest revision. update on memo memoUpdatedTimestamp n days ago
@@ -47,8 +42,8 @@ public class Memo {
     @Column("memo_latest_revision")
     private Long memoLatestRevision;
 
-    @Column("memo_alt_content")
-    private String memoAltContent; // google docs url, memo content draft => content is saved until same user stops editing. (max 12 hours)
+    @Column("memo_embed_content")
+    private String memoEmbedContent; // e.g. google docs url, cannot be edited. only can be updated by admin
 
     @Transient
     private Integer position;
@@ -64,10 +59,14 @@ public class Memo {
     public Memo(Long pointId, String title, Long userId) {
         this.memoPoint = pointId;
         this.memoTitle = title;
-        this.memoType = MemoType.TEXT;
         this.memoCreatedUser = userId;
         this.memoCreatedTimestamp = Instant.now();
         this.memoUpdatedTimestamp = Instant.now();
         this.memoCreatedUser = userId;
+    }
+
+    public Memo(Long pointId, String title, Long userId, String embedContent) {
+        this(pointId, title, userId);
+        this.memoEmbedContent = embedContent;
     }
 }

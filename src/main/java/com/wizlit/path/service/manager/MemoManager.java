@@ -12,7 +12,6 @@ import com.wizlit.path.entity.MemoDraft;
 import com.wizlit.path.entity.MemoReserve;
 import com.wizlit.path.entity.MemoRevision;
 import com.wizlit.path.entity.RevisionContent;
-import com.wizlit.path.entity.vo.MemoType;
 import com.wizlit.path.exception.ApiException;
 import com.wizlit.path.exception.ErrorCode;
 import com.wizlit.path.model.domain.MemoDto;
@@ -157,11 +156,16 @@ public class MemoManager {
             .flatMap(memo -> _updateTitle(memo, title));
     }
 
-    public Mono<Memo> updateExternalMemo(Memo memo, String title) {
-        if (memo.getMemoType() != MemoType.GOOGLE_DOCS) {
-            return Mono.error(new ApiException(ErrorCode.NOT_EXTERNAL_MEMO, memo.getMemoId()));
-        }
-        return _updateTitle(memo, title);
+    public Mono<Memo> changeEmbedContent(Long memoId, String embedContent) {
+        return findMemoById(memoId)
+            .flatMap(memo -> {
+                if (memo.getMemoEmbedContent() == null) {
+                    return Mono.error(new ApiException(ErrorCode.NOT_EMBED_MEMO, memoId));
+                }
+
+                memo.setMemoEmbedContent(embedContent);
+                return _saveMemo(memo);
+            });
     }
 
     public Mono<Memo> moveMemo(Long memoId, Long newPointId) {
@@ -418,6 +422,31 @@ public class MemoManager {
             .draftContent(content)
             .build();
         return _saveDraft(newDraft);
+    }
+
+    /**
+     * Creates a new embed memo.
+     *
+     * @param pointId The ID of the point to create the memo for
+     * @param userId The ID of the user to create the memo for
+     * @param title The title of the memo
+     * @param embedContent The embed content of the memo
+     * @return A Mono containing the saved Memo
+     */
+    public Mono<Tuple2<Memo, MemoDraft>> createEmbedMemo(Long pointId, Long userId, String title, String embedContent) {
+        Memo newMemo = new Memo(pointId, title, userId, embedContent);
+        return _saveMemo(newMemo)
+            .flatMap(savedMemo -> _addContributor(savedMemo.getMemoId(), userId)
+                .then(Mono.just(savedMemo)))
+            .flatMap(savedMemo -> {
+                // Ensure we have the memo ID before creating the draft
+                if (savedMemo.getMemoId() == null) {
+                    return Mono.error(new ApiException(ErrorCode.INTERNAL_SERVER, "Failed to get memo ID after save"));
+                }
+
+                return _saveNewDraft(savedMemo.getMemoId(), userId, title, "")
+                    .map(savedDraft -> Tuples.of(savedMemo, savedDraft));
+            });
     }
 
     /**

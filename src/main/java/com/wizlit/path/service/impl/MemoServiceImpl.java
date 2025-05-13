@@ -18,7 +18,6 @@ import com.wizlit.path.entity.MemoDraft;
 import com.wizlit.path.entity.MemoReserve;
 import com.wizlit.path.service.manager.PointManager;
 import com.wizlit.path.temp.GoogleService;
-import com.wizlit.path.entity.vo.MemoType;
 import com.wizlit.path.exception.ApiException;
 import com.wizlit.path.exception.ErrorCode;
 
@@ -33,7 +32,7 @@ public class MemoServiceImpl implements MemoService {
     
     private final MemoManager memoManager;
     private final PointManager pointManager;
-    private final GoogleService driveService;
+    // private final GoogleService driveService;
 
     @Override
     public Flux<MemoDto> listMemosByPointId(Long pointId, Instant updatedAfter) {
@@ -43,6 +42,29 @@ public class MemoServiceImpl implements MemoService {
     @Override
     public Mono<MemoDto> getMemo(Long memoId, Instant updatedAfter) {
         return memoManager.getFullMemo(memoId, updatedAfter);
+    }
+
+    @Transactional
+    @Override
+    public Mono<MemoDto> createEmbedMemo(Long pointId, UserDto user, String title, String embedContent) {
+        return memoManager.createEmbedMemo(pointId, user.getUserId(), title, embedContent)
+            .flatMap(tuple -> {
+                Memo savedMemo = tuple.getT1();
+                MemoDraft savedDraft = tuple.getT2();
+
+                return pointManager.addMemoToPoint(pointId, savedMemo.getMemoId())
+                    .then(Mono.defer(() -> {
+                        MemoDto dto = MemoDto.from(
+                            pointId,
+                            savedMemo,
+                            savedDraft,
+                            user.getUserId()
+                        );
+
+                        return Mono.just(dto);
+                    }));
+            });
+
     }
 
     @Transactional
@@ -76,27 +98,27 @@ public class MemoServiceImpl implements MemoService {
 
     @Transactional
     @Override
-    public Mono<MemoDto> updateExternalMemo(
+    public Mono<MemoDto> updateEmbedContent(
         Long memoId,
-        String externalKey,
-        String title
+        String embedContent
     ) {
-        return memoManager.findMemoById(memoId)
-            .<Memo>flatMap(memo -> {
-                if (memo.getMemoType() == MemoType.GOOGLE_DOCS) {
-                    String documentUrl = memo.getMemoAltContent();
-
-                    // If title is being updated and document exists, update Google Drive file name
-                    if (title != null && documentUrl != null) {
-                        // Extract file ID from Google Docs URL
-                        String fileId = documentUrl.substring(documentUrl.lastIndexOf("/") + 1);
-                        return driveService.updateFileName(externalKey, fileId, memoId + " // " + title)
-                            .then(memoManager.updateExternalMemo(memo, title));
-                    }
-                }
-                throw new ApiException(ErrorCode.NOT_EXTERNAL_MEMO, memoId);
-            })
+        return memoManager.changeEmbedContent(memoId, embedContent)
             .flatMap(memo -> memoManager.getFullMemo(memoId));
+        // return memoManager.findMemoById(memoId)
+        //     .<Memo>flatMap(memo -> {
+        //         if (memo.getMemoEmbedContent() != null) {
+        //             String documentUrl = memo.getMemoEmbedContent();
+
+        //             // If title is being updated and document exists, update Google Drive file name
+        //             if (title != null && documentUrl != null) {
+        //                 // Extract file ID from Google Docs URL
+        //                 String fileId = documentUrl.substring(documentUrl.lastIndexOf("/") + 1);
+        //                 return driveService.updateFileName(externalKey, fileId, memoId + " // " + title)
+        //                     .then(memoManager.updateExternalMemo(memo, title));
+        //             }
+        //         }
+        //         throw new ApiException(ErrorCode.NOT_EXTERNAL_MEMO, memoId);
+        //     })
     }
 
     // private Mono<Point> processDocument(String token, Point savedPoint) {

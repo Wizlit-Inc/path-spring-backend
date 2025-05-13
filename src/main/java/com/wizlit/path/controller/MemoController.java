@@ -8,6 +8,7 @@ import reactor.util.function.Tuples;
 
 import com.wizlit.path.model.ResponseWithChange;
 import com.wizlit.path.model.domain.MemoDto;
+import com.wizlit.path.model.request.EmbedMemoRequest;
 import com.wizlit.path.model.request.MemoRequest;
 import com.wizlit.path.model.response.FinalResponse;
 import com.wizlit.path.service.MemoService;
@@ -39,6 +40,53 @@ public class MemoController {
     
     private final UserService userService;
     private final MemoService memoService;
+
+    @Operation(
+        summary = "Create a new embed memo",
+        description = "Creates a new embed memo in the specified point with the given title and embed content"
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "201", description = "Embed memo created successfully"),
+        @ApiResponse(responseCode = "400", description = "Invalid input parameters (ErrorCode: NULL_INPUT, EMPTY)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "401", description = "Unauthorized access (ErrorCode: INVALID_TOKEN, EXPIRED_TOKEN)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "403", description = "Forbidden - Admin access required (ErrorCode: INACCESSIBLE_USER)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "404", description = "Point not found (ErrorCode: POINT_NOT_FOUND)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "409", description = "Point has reached maximum number of memos (ErrorCode: POINT_MAX_MEMOS_REACHED)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "500", description = "Internal server error (ErrorCode: INTERNAL_SERVER, UNKNOWN)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping("/embed")
+    @PrivateAccess
+    public Mono<ResponseEntity<ResponseWithChange<FinalResponse>>> createEmbedMemo(
+        @RequestAttribute("email") String email,
+        @RequestAttribute("name") String name,
+        @RequestAttribute("avatar") String avatar,
+        @RequestParam Long pointId,
+        @RequestBody EmbedMemoRequest embedMemoRequest
+    ) {
+        return userService.getUserByEmailAndCreateIfNotExists(email, name, avatar)
+            .flatMap(user -> memoService.createEmbedMemo(
+                pointId,
+                user,
+                embedMemoRequest.getMemoTitle(),
+                embedMemoRequest.getMemoEmbedContent()
+            ))
+            .map(memoDto -> new FinalResponse().forOnlyMemo(memoDto.getMemoId(), memoDto, null))
+            .switchIfEmpty(Mono.just(new FinalResponse()))
+            .map(ResponseWithChange::new)
+            .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.CREATED));
+    }
 
     @Operation(
         summary = "Create a new memo",
@@ -113,7 +161,7 @@ public class MemoController {
             content = @Content(mediaType = "application/json", 
                 schema = @Schema(implementation = ErrorResponse.class)))
     })
-    @GetMapping("/{memoId}")
+    @GetMapping("t/{memoId}")
     public Mono<ResponseEntity<ResponseWithChange<FinalResponse>>> getMemo(
         @PathVariable Long memoId,
         @RequestParam(required = false) Long lastFetchTimestamp
@@ -153,7 +201,7 @@ public class MemoController {
             content = @Content(mediaType = "application/json", 
                 schema = @Schema(implementation = ErrorResponse.class)))
     })
-    @PostMapping("/{memoId}")
+    @PostMapping("t/{memoId}")
     @PrivateAccess
     public Mono<ResponseEntity<ResponseWithChange<FinalResponse>>> saveMemo(
         @PathVariable Long memoId,
@@ -185,36 +233,6 @@ public class MemoController {
     }
 
     @Operation(
-        summary = "Edit external memo",
-        description = "Updates the title of an external memo"
-    )
-    @ApiResponses(value = {
-        @ApiResponse(responseCode = "200", description = "External memo updated successfully"),
-        @ApiResponse(responseCode = "400", description = "Invalid input parameters (ErrorCode: NULL_INPUT, NOT_EXTERNAL_MEMO)",
-            content = @Content(mediaType = "application/json", 
-                schema = @Schema(implementation = ErrorResponse.class))),
-        @ApiResponse(responseCode = "401", description = "Unauthorized access (ErrorCode: INVALID_TOKEN, EXPIRED_TOKEN)",
-            content = @Content(mediaType = "application/json", 
-                schema = @Schema(implementation = ErrorResponse.class))),
-        @ApiResponse(responseCode = "404", description = "Memo not found (ErrorCode: MEMO_NOT_FOUND)",
-            content = @Content(mediaType = "application/json", 
-                schema = @Schema(implementation = ErrorResponse.class)))
-    })
-    @PutMapping("/{memoId}/external")
-    @PrivateAccess
-    public Mono<ResponseEntity<ResponseWithChange<FinalResponse>>> editExternalMemo(
-        @PathVariable Long memoId,
-        @RequestAttribute("token") String token,
-        @RequestParam String title
-    ) {
-        return memoService.updateExternalMemo(memoId, token, title)
-            .map(memo -> new FinalResponse().forOnlyMemo(memoId, memo, null))
-            .switchIfEmpty(Mono.just(new FinalResponse()))
-            .map(ResponseWithChange::new)
-            .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.OK));
-    }
-
-    @Operation(
         summary = "Reserve memo for editing",
         description = "Reserves a memo for editing by a specific user"
     )
@@ -233,7 +251,7 @@ public class MemoController {
             content = @Content(mediaType = "application/json", 
                 schema = @Schema(implementation = ErrorResponse.class)))
     })
-    @PostMapping("/{memoId}/reserve")
+    @PostMapping("t/{memoId}/reserve")
     @PrivateAccess
     public Mono<ResponseEntity<ResponseWithChange<FinalResponse>>> reserveMemo(
         @PathVariable Long memoId,
@@ -271,7 +289,7 @@ public class MemoController {
             content = @Content(mediaType = "application/json", 
                 schema = @Schema(implementation = ErrorResponse.class)))
     })
-    @DeleteMapping("/{memoId}/reserve")
+    @DeleteMapping("t/{memoId}/reserve")
     @PrivateAccess
     public Mono<ResponseEntity<Void>> cancelReserve(
         @PathVariable Long memoId,
@@ -301,7 +319,7 @@ public class MemoController {
             content = @Content(mediaType = "application/json", 
                 schema = @Schema(implementation = ErrorResponse.class)))
     })
-    @PostMapping("/{memoId}/move")
+    @PostMapping("t/{memoId}/move")
     @PrivateAccess
     public Mono<ResponseEntity<ResponseWithChange<Void>>> moveMemo(
         @PathVariable Long memoId,

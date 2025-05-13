@@ -11,7 +11,6 @@ import lombok.NoArgsConstructor;
 import com.wizlit.path.entity.Memo;
 import com.wizlit.path.entity.MemoDraft;
 import com.wizlit.path.entity.MemoRevision;
-import com.wizlit.path.entity.vo.MemoType;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 
@@ -25,7 +24,6 @@ public class MemoDto {
     private Long memoId;
     private Long memoPoint;
     private String memoTitle;
-    private MemoType memoType;
     private String memoSummary;
     private Long memoSummaryTimestamp;
     private Long memoCreatedTimestamp;
@@ -33,7 +31,8 @@ public class MemoDto {
     private Long memoUpdatedTimestamp; // memo draft updated timestamp || memo latest revision timestamp
     private Long memoUpdatedUser; // memo draft editor || memo latest revision actor
     private List<Long> contributorUserIds;
-    private String content; // memo alt content || memo draft content || memo latest revision content
+    private String memoEmbedContent;
+    private String memoContent; // memo draft content || memo latest revision content
 
     public static MemoDto from(
         Long pointId,
@@ -76,37 +75,33 @@ public class MemoDto {
                 .memoId(memo.getMemoId())
                 .memoPoint(memo.getMemoPoint())
                 .memoTitle(memo.getMemoTitle())
-                .memoType(memo.getMemoType())
                 .memoSummary(memo.getMemoSummary())
                 .memoSummaryTimestamp(memo.getMemoSummaryTimestamp() != null ? memo.getMemoSummaryTimestamp().toEpochMilli() : null)
                 .memoCreatedTimestamp(memo.getMemoCreatedTimestamp() != null ? memo.getMemoCreatedTimestamp().toEpochMilli() : null)
                 .memoCreatedUser(memo.getMemoCreatedUser())
+                .memoEmbedContent(memo.getMemoEmbedContent())
                 .contributorUserIds(contributorUserIds)
                 .build();
 
-        if (memo.getMemoType() == MemoType.TEXT) {
-            if (memoDraft != null && memoRevision != null) {
-                // Compare timestamps to determine which is more recent
-                if (memoDraft.getDraftUpdatedTimestamp().isAfter(memoRevision.getRevTimestamp())) {
-                    dto.setMemoUpdatedTimestamp(memoDraft.getDraftUpdatedTimestamp() != null ? memoDraft.getDraftUpdatedTimestamp().toEpochMilli() : null);
-                    dto.setMemoUpdatedUser(memoDraft.getDraftEditor());
-                    dto.setContent(memoDraft.getDraftContent());
-                } else {
-                    dto.setMemoUpdatedTimestamp(memoRevision.getRevTimestamp() != null ? memoRevision.getRevTimestamp().toEpochMilli() : null);
-                    dto.setMemoUpdatedUser(memoRevision.getRevActor());
-                    dto.setContent(revisionContent.getContent());
-                }
-            } else if (memoDraft != null) {
+        if (memoDraft != null && memoRevision != null) {
+            // Compare timestamps to determine which is more recent
+            if (memoDraft.getDraftUpdatedTimestamp().isAfter(memoRevision.getRevTimestamp())) {
                 dto.setMemoUpdatedTimestamp(memoDraft.getDraftUpdatedTimestamp() != null ? memoDraft.getDraftUpdatedTimestamp().toEpochMilli() : null);
                 dto.setMemoUpdatedUser(memoDraft.getDraftEditor());
-                dto.setContent(memoDraft.getDraftContent());
-            } else if (memoRevision != null) {
+                dto.setMemoContent(memoDraft.getDraftContent());
+            } else {
                 dto.setMemoUpdatedTimestamp(memoRevision.getRevTimestamp() != null ? memoRevision.getRevTimestamp().toEpochMilli() : null);
                 dto.setMemoUpdatedUser(memoRevision.getRevActor());
-                dto.setContent(revisionContent.getContent());
+                dto.setMemoContent(revisionContent.getContent());
             }
-        } else {
-            dto.setContent(memo.getMemoAltContent());
+        } else if (memoDraft != null) {
+            dto.setMemoUpdatedTimestamp(memoDraft.getDraftUpdatedTimestamp() != null ? memoDraft.getDraftUpdatedTimestamp().toEpochMilli() : null);
+            dto.setMemoUpdatedUser(memoDraft.getDraftEditor());
+            dto.setMemoContent(memoDraft.getDraftContent());
+        } else if (memoRevision != null) {
+            dto.setMemoUpdatedTimestamp(memoRevision.getRevTimestamp() != null ? memoRevision.getRevTimestamp().toEpochMilli() : null);
+            dto.setMemoUpdatedUser(memoRevision.getRevActor());
+            dto.setMemoContent(revisionContent.getContent());
         }
         
         return dto;

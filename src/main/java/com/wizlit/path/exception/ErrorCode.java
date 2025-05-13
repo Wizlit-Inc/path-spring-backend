@@ -50,8 +50,8 @@ public enum ErrorCode {
             "The memo is currently reserved by another user - memo: %d / user: %d"),
     MEMO_NOT_FOUND(HttpStatus.NOT_FOUND,
             "The specified memo could not be found - memo: %d"),
-    NOT_EXTERNAL_MEMO(HttpStatus.BAD_REQUEST,
-            "Memo is not an external document"),
+    NOT_EMBED_MEMO(HttpStatus.BAD_REQUEST,
+            "Memo is not an embed memo"),
     ABNORMAL_CONTENT_DELETION(HttpStatus.BAD_REQUEST,
             "Content deletion too large: %s"),
 

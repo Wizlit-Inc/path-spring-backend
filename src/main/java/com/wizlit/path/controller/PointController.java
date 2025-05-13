@@ -129,7 +129,7 @@ public class PointController {
             PointDto point = tuple.getT1();
             List<MemoDto> memos = tuple.getT2();
             
-            List<Long> allUserIds = Stream.<Long>concat(
+            List<Long> allUserIds = Stream.concat(
                 Stream.empty(),
                 // Stream.of(point.getPointCreatedUser()),
                 memos.stream()

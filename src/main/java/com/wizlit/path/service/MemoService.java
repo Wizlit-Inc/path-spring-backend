@@ -11,9 +11,10 @@ import reactor.core.publisher.Mono;
 public interface MemoService {
     Flux<MemoDto> listMemosByPointId(Long pointId, Instant updatedAfter);
     Mono<MemoDto> getMemo(Long memoId, Instant updatedAfter);
+    Mono<MemoDto> createEmbedMemo(Long pointId, UserDto user, String title, String embedContent);
     Mono<MemoDto> createMemo(Long pointId, UserDto user, String title, String content);
     Mono<MemoDto> updateMemo(Long memoId, UserDto user, String title, String content, String reserveCode);
-    Mono<MemoDto> updateExternalMemo(Long memoId, String externalKey, String title);
+    Mono<MemoDto> updateEmbedContent(Long memoId, String embedContent);
     Mono<String> reserveMemo(Long memoId, UserDto user, String currentReserveCode);
     Mono<Void> cancelReserve(Long memoId, UserDto user, String reserveCode);
     Mono<Void> moveMemo(Long memoId, Long newPointId);

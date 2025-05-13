@@ -51,7 +51,7 @@ public interface PointRepository extends ReactiveCrudRepository<Point, Long> {
       "  (EXTRACT(EPOCH FROM p.point_summary_timestamp) * 1000)::bigint AS point_summary_timestamp, " +
       "  (EXTRACT(EPOCH FROM p.point_created_timestamp) * 1000)::bigint AS point_created_timestamp, " +
       "  (EXTRACT(EPOCH FROM p.point_updated_timestamp) * 1000)::bigint AS point_updated_timestamp, " +
-      "  COALESCE(ARRAY_AGG(pm.memo_id ORDER BY pm.memo_order), ARRAY[]::bigint[]) AS memo_ids_in_order " +
+      "  COALESCE(ARRAY_AGG(pm.memo_id ORDER BY pm.memo_order) FILTER (WHERE pm.memo_order IS NOT NULL), ARRAY[]::bigint[]) AS memo_ids_in_order " +
       "FROM point p " +
       "LEFT JOIN point_memo pm ON p.point_id = pm.point_id " +
       "WHERE p.point_id IN (:ids) " +
