@@ -317,9 +317,10 @@ public class MemoManager {
      *
      * @param existingDraft The draft to add the revision to
      * @param newUserId The ID of the user to add the revision for
+     * @param force If true, forces creation of a new revision regardless of other conditions
      * @return A Mono containing the saved MemoRevision, or an error if the save fails
      */
-    private Mono<MemoRevision> _addNewRevision(MemoDraft existingDraft, Long newUserId) {
+    private Mono<MemoRevision> _addNewRevision(MemoDraft existingDraft, Long newUserId, boolean force) {
         Long oldUserId = existingDraft.getDraftEditor();
         String trimmedTitle = existingDraft.getDraftTitle().trim();
         String trimmedContent = existingDraft.getDraftContent().trim();
@@ -327,7 +328,8 @@ public class MemoManager {
         Boolean isSameUser = oldUserId.equals(newUserId);
         Boolean tooOldDraft = Instant.now().isAfter(existingDraft.getDraftCreatedTimestamp().plusSeconds(LIMIT_DRAFT_STORED_TIME));
         Boolean emptyContent = trimmedTitle.equals("") && trimmedContent.equals("");
-        if (isSameUser && !tooOldDraft) {
+        
+        if (!force && isSameUser && !tooOldDraft) {
             return Mono.empty(); // update draft
         }
 
@@ -374,6 +376,11 @@ public class MemoManager {
                 }
                 return Mono.just(new MemoRevision()); // new draft
             });
+    }
+
+    // Add overloaded method for backward compatibility
+    private Mono<MemoRevision> _addNewRevision(MemoDraft existingDraft, Long newUserId) {
+        return _addNewRevision(existingDraft, newUserId, false);
     }
     
     /**
@@ -506,18 +513,11 @@ public class MemoManager {
                 int oldLength = existingDraft.getDraftContent() != null ? existingDraft.getDraftContent().length() : 0;
                 int newLength = content != null ? content.length() : 0;
                 int lengthDiff = oldLength - newLength;
+
+                // If more than 80% of content was deleted and original content was long (>2000 chars), force new revision
+                boolean isAbnormalUpdate = oldLength > 2000 && lengthDiff > 0 && (double) lengthDiff / oldLength > 0.8;
                 
-                // If more than 80% of content was deleted, consider it abnormal
-                if (oldLength > 0 && lengthDiff > 0 && (double) lengthDiff / oldLength > 0.8) {
-                    return Mono.<MemoDraft>error(new ApiException(ErrorCode.ABNORMAL_CONTENT_DELETION, 
-                        String.format("%d characters removed (%.1f%%)", 
-                            lengthDiff, (double) lengthDiff / oldLength * 100)));
-                }
-                
-                return Mono.just(existingDraft);
-            })
-            .flatMap(existingDraft -> 
-                _addNewRevision(existingDraft, userId)
+                return _addNewRevision(existingDraft, userId, isAbnormalUpdate)
                     .flatMap(savedRevision -> _deleteDraft(memoId)
                         .then(_saveNewDraft(memoId, userId, title, content)))
                     .switchIfEmpty(Mono.defer(() -> {
@@ -526,8 +526,8 @@ public class MemoManager {
                         return _saveDraft(existingDraft)
                             .flatMap(draft -> _updateTitle(memoId, title)
                                 .thenReturn(draft));
-                    }))
-            );
+                    }));
+            });
     }
 
 }

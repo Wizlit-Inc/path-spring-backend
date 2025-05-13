@@ -212,7 +212,6 @@ public class PointController {
                 schema = @Schema(implementation = ErrorResponse.class)))
     })
     @DeleteMapping("/{pointId}")
-    @PrivateAccess(role = "admin")
     public Mono<ResponseEntity<ResponseWithChange<Void>>> deletePoint(
         @PathVariable Long pointId
     ) {
