@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-public class MemoRequest {
+public class NewMemoRequest {
     private String memoTitle;
     private String memoContent;
 }

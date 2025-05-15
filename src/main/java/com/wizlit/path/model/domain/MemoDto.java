@@ -1,5 +1,6 @@
 package com.wizlit.path.model.domain;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -20,7 +21,6 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 @Builder
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class MemoDto {
-    private Long pointId;
     private Long memoId;
     private Long memoPoint;
     private String memoTitle;
@@ -35,35 +35,31 @@ public class MemoDto {
     private String memoContent; // memo draft content || memo latest revision content
 
     public static MemoDto from(
-        Long pointId,
         Memo memo,
         MemoDraft memoDraft,
         Long contributorUserId
     ) {
-        return MemoDto.from(pointId, memo, memoDraft, null, null, Arrays.asList(contributorUserId));
+        return MemoDto.from(memo, memoDraft, null, null, new ArrayList<>(Arrays.asList(contributorUserId)));
     }
 
     public static MemoDto from(
-        Long pointId,
         Memo memo,
         MemoDraft memoDraft,
         List<Long> contributorUserIds
     ) {
-        return MemoDto.from(pointId, memo, memoDraft, null, null, contributorUserIds);
+        return MemoDto.from(memo, memoDraft, null, null, new ArrayList<>(contributorUserIds));
     }
 
     public static MemoDto from(
-        Long pointId,
         Memo memo,
         MemoRevision memoRevision,
         RevisionContentDto revisionContent,
         List<Long> contributorUserIds
     ) {
-        return MemoDto.from(pointId, memo, null, memoRevision, revisionContent, contributorUserIds);
+        return MemoDto.from(memo, null, memoRevision, revisionContent, new ArrayList<>(contributorUserIds));
     }
 
     private static MemoDto from(
-        Long pointId,
         Memo memo,
         MemoDraft memoDraft,
         MemoRevision memoRevision,
@@ -71,7 +67,6 @@ public class MemoDto {
         List<Long> contributorUserIds
     ) {
         MemoDto dto = MemoDto.builder()
-                .pointId(pointId)
                 .memoId(memo.getMemoId())
                 .memoPoint(memo.getMemoPoint())
                 .memoTitle(memo.getMemoTitle())

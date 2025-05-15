@@ -91,7 +91,7 @@ public class PointController {
                 addPointRequest.getOrigin(),
                 addPointRequest.getDestination()
             ))
-            .map(point -> new FinalResponse().forOnlyPoint(point))
+            .map(point -> new FinalResponse().forOnlyPoint(point.getPointId(), point))
             .map(ResponseWithChange::new)
             .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.CREATED));
     }
@@ -145,7 +145,7 @@ public class PointController {
             
             return userService.listUserByUserIds(allUserIds, updatedAfter)
                 .collectList()
-                .map(users -> new FinalResponse().forGetPoint(point, memos, users));
+                .map(users -> new FinalResponse().forGetPoint(point.getPointId(), point, memos, users));
         })
         .switchIfEmpty(Mono.just(new FinalResponse()))
         .map(ResponseWithChange::new)
@@ -184,7 +184,7 @@ public class PointController {
             @RequestBody UpdatePointRequest updatePointRequest
     ) {
         return pointService.updatePoint(pointId, updatePointRequest.getTitle())
-            .map(point -> new FinalResponse().forOnlyPoint(point))
+            .map(point -> new FinalResponse().forOnlyPoint(point.getPointId(), point))
             .map(ResponseWithChange::new)
             .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.OK));
     }
@@ -212,6 +212,7 @@ public class PointController {
                 schema = @Schema(implementation = ErrorResponse.class)))
     })
     @DeleteMapping("/{pointId}")
+    @PrivateAccess
     public Mono<ResponseEntity<ResponseWithChange<Void>>> deletePoint(
         @PathVariable Long pointId
     ) {

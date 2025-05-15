@@ -16,8 +16,6 @@ public enum ErrorCode {
             "It is a backward path from originPoint to destinationPoint within %d edges - origin: %d, destination: %d"),
 
     // point errors
-    NULL_INPUT(HttpStatus.BAD_REQUEST,
-            "parameter is null - %s"),
     NULL_POINTS(HttpStatus.BAD_REQUEST,
             "Origin and destination parameters must not be null - origin: %d, destination: %d"),
     SAME_POINTS(HttpStatus.BAD_REQUEST,
@@ -46,6 +44,8 @@ public enum ErrorCode {
     // memo errors
     MEMO_ALREADY_EXISTS(HttpStatus.BAD_REQUEST,
             "A memo already exists in the point - point: %d, memo: %d"),
+    MEMO_TITLE_DUPLICATE(HttpStatus.CONFLICT,
+            "A memo with the same title already exists - title: %s"),
     MEMO_RESERVED(HttpStatus.CONFLICT,
             "The memo is currently reserved by another user - memo: %d / user: %d"),
     MEMO_NOT_FOUND(HttpStatus.NOT_FOUND,
@@ -62,6 +62,14 @@ public enum ErrorCode {
     // drive errors
     COPY_FAILED(HttpStatus.BAD_REQUEST,
             "Copy failed: %s"),
+
+    // Validation errors
+    MIN_LENGTH(HttpStatus.BAD_REQUEST,
+            "Field '%s' must be at least %s characters long"),
+    MAX_LENGTH(HttpStatus.BAD_REQUEST,
+            "Field '%s' must not exceed %s characters"),
+    NULL_INPUT(HttpStatus.BAD_REQUEST,
+            "parameter is null - %s"),
 
     // Generic errors
     EMPTY(HttpStatus.BAD_REQUEST,

@@ -38,9 +38,6 @@ public class MemoDraft implements Persistable<Long> {
     @Column("draft_updated_timestamp")
     private Instant draftUpdatedTimestamp; // draft last updated timestamp will be used in memo revision create timestamp
 
-    @Column("draft_title")
-    private String draftTitle;
-
     @Column("draft_content")
     private String draftContent;
 
@@ -72,23 +69,7 @@ public class MemoDraft implements Persistable<Long> {
     public MemoDraft updateFrom(MemoDraft draft) {
         this.draftEditor = draft.getDraftEditor();
         this.draftUpdatedTimestamp = draft.getDraftUpdatedTimestamp();
-        this.draftTitle = draft.getDraftTitle();
         this.draftContent = draft.getDraftContent();
         return this;
-    }
-
-    private static String toJson(String title, String content) {
-        return String.format("{'title':'%s','content':'%s'}", 
-            title.replace("'", "\\'"), 
-            content.replace("'", "\\'"));
-    }
-
-    public String toJson() {
-        return toJson(draftTitle, draftContent);
-    }
-
-    public Boolean sameJsonAs(String compareJson) {
-        String draftJson = toJson();
-        return draftJson.equals(compareJson);
     }
 }

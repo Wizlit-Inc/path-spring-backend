@@ -37,12 +37,15 @@ public class MemoReserve implements Persistable<Long> {
     private Long reserveEditor; // user who reserved memo
 
     @Column("reserve_timestamp")
-    private Instant reserveTimestamp; // after 5~15 minutes (=expire), other user can override
+    private Instant reserveTimestamp;
 
-    public MemoReserve(Long reserveMemo, Long reserveEditor) {
+    @Column("reserve_expire_timestamp")
+    private Instant reserveExpireTimestamp; // after 5~15 minutes (=expire), other user can override
+
+    public MemoReserve(Long reserveMemo, Long reserveEditor, long additionalExpireTime) {
         this.reserveMemo = reserveMemo;
         this.reserveEditor = reserveEditor;
-        this.reserveTimestamp = Instant.now();
+        this.reserveExpireTimestamp = Instant.now().plusSeconds(additionalExpireTime);
     }
 
     @Transient
@@ -73,7 +76,7 @@ public class MemoReserve implements Persistable<Long> {
     public MemoReserve updateFrom(MemoReserve reserve) {
         this.reserveCode = reserve.getReserveCode();
         this.reserveEditor = reserve.getReserveEditor();
-        this.reserveTimestamp = reserve.getReserveTimestamp();
+        this.reserveExpireTimestamp = reserve.getReserveExpireTimestamp();
         return this;
     }
 }

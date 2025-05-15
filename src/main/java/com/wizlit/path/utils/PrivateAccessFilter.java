@@ -78,7 +78,8 @@ public class PrivateAccessFilter implements WebFilter {
                     PrivateAccess privateAccess = handlerMethod.getMethod().getAnnotation(PrivateAccess.class);
                     
                     if (privateAccess != null) {
-                        if (developerMode) {
+                        String authHeader = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+                        if ((authHeader == null || authHeader.isEmpty()) && developerMode) {
                             // In developer mode, check if admin role is required
                             if ("admin".equals(privateAccess.role()) && !DEVELOPER_EMAIL.equals(ADMIN_EMAIL)) {
                                 return Mono.error(new ApiException(ErrorCode.INACCESSIBLE_USER));

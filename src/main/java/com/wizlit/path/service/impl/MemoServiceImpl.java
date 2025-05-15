@@ -10,6 +10,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import com.wizlit.path.model.domain.MemoDto;
+import com.wizlit.path.model.domain.ReserveMemoDto;
 import com.wizlit.path.model.domain.UserDto;
 import com.wizlit.path.service.MemoService;
 import com.wizlit.path.service.manager.MemoManager;
@@ -20,6 +21,8 @@ import com.wizlit.path.service.manager.PointManager;
 import com.wizlit.path.temp.GoogleService;
 import com.wizlit.path.exception.ApiException;
 import com.wizlit.path.exception.ErrorCode;
+import com.wizlit.path.model.domain.MemoRevisionDto;
+import com.wizlit.path.model.domain.RevisionContentDto;
 
 @Service
 @RequiredArgsConstructor
@@ -55,7 +58,6 @@ public class MemoServiceImpl implements MemoService {
                 return pointManager.addMemoToPoint(pointId, savedMemo.getMemoId())
                     .then(Mono.defer(() -> {
                         MemoDto dto = MemoDto.from(
-                            pointId,
                             savedMemo,
                             savedDraft,
                             user.getUserId()
@@ -64,7 +66,6 @@ public class MemoServiceImpl implements MemoService {
                         return Mono.just(dto);
                     }));
             });
-
     }
 
     @Transactional
@@ -78,7 +79,6 @@ public class MemoServiceImpl implements MemoService {
                 return pointManager.addMemoToPoint(pointId, savedMemo.getMemoId())
                     .then(Mono.defer(() -> {
                         MemoDto dto = MemoDto.from(
-                            pointId,
                             savedMemo,
                             savedDraft,
                             user.getUserId()
@@ -91,9 +91,16 @@ public class MemoServiceImpl implements MemoService {
 
     @Transactional
     @Override
-    public Mono<MemoDto> updateMemo( Long memoId, UserDto user, String title, String content, String reserveCode) {
-        return memoManager.updateDraft(memoId, user.getUserId(), title, content, reserveCode)
+    public Mono<MemoDto> updateMemo( Long memoId, UserDto user, String content, String reserveCode) {
+        return memoManager.updateDraft(memoId, user.getUserId(), content, reserveCode)
             .flatMap(draftDto -> memoManager.getFullMemo(memoId));
+    }
+
+    @Transactional
+    @Override
+    public Mono<MemoDto> updateTitle(Long memoId, String title) {
+        return memoManager.changeTitle(memoId, title)
+            .flatMap(memo -> memoManager.getFullMemo(memoId));
     }
 
     @Transactional
@@ -139,9 +146,8 @@ public class MemoServiceImpl implements MemoService {
 
     @Transactional
     @Override
-    public Mono<String> reserveMemo(Long memoId, UserDto user, String currentReserveCode) {
-        return memoManager.createReserve(memoId, user.getUserId(), currentReserveCode)
-            .map(MemoReserve::getReserveCode);
+    public Mono<ReserveMemoDto> reserveMemo(Long memoId, UserDto user, String currentReserveCode) {
+        return memoManager.createReserve(memoId, user.getUserId(), currentReserveCode);
     }
 
     @Transactional
@@ -157,5 +163,20 @@ public class MemoServiceImpl implements MemoService {
             pointManager.moveMemoToPoint(newPointId, memoId),
             memoManager.moveMemo(memoId, newPointId)
         ).then();
+    }
+
+    @Override
+    public Flux<MemoRevisionDto> listRevisions(Long memoId, Instant beforeTimestamp, int limit) {
+        return memoManager.listRevision(memoId, beforeTimestamp, limit);
+    }
+
+    @Override
+    public Mono<RevisionContentDto> getRevisionContent(Long revisionId) {
+        return memoManager.getRevisionContent(revisionId);
+    }
+
+    @Override
+    public Mono<Void> rollbackToRevision(Long memoId, UserDto user, Long revisionId, Boolean forced) {
+        return memoManager.rollbackToRevision(memoId, user.getUserId(), revisionId, forced);
     }
 }

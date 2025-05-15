@@ -42,7 +42,7 @@ public class MemoRevision {
     private Long revParentId; // parent revision id. if null, it is the first revision 
 
     @Column("rev_summary")
-    private String revSummary; // an ai summary of diff
+    private String revSummary; // an ai summary of diff (if reverted, say "reverted")
 
     @Column("rev_content")
     private Long revContent; // revision content id. if content is reverted, it will be useful

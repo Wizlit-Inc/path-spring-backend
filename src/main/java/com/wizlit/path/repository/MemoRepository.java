@@ -15,15 +15,22 @@ import reactor.core.publisher.Mono;
 public interface MemoRepository extends R2dbcRepository<Memo, Long> {
     // 필드명을 snake_case로 유지하고, timestamp 컬럼은 epoch milliseconds(Bigint)로 변환
     String COMMON_SELECT_FIELDS =
-        "m.memo_point AS memo_point, " +
         "m.memo_id AS memo_id, " +
+        "m.memo_point AS memo_point, " +
         "m.memo_title AS memo_title, " +
         "m.memo_summary AS memo_summary, " +
         "m.memo_embed_content AS memo_embed_content, " +
         "(EXTRACT(EPOCH FROM m.memo_summary_timestamp) * 1000)::bigint AS memo_summary_timestamp, " +
         "(EXTRACT(EPOCH FROM m.memo_created_timestamp) * 1000)::bigint AS memo_created_timestamp, " +
+        "m.memo_created_user AS memo_created_user, " +
         "(EXTRACT(EPOCH FROM GREATEST(m.memo_updated_timestamp, COALESCE(d.draft_updated_timestamp, m.memo_updated_timestamp))) * 1000)::bigint AS memo_updated_timestamp, " +
-        "ARRAY(SELECT mc.user_id FROM memo_contributor mc WHERE mc.memo_id = m.memo_id) AS contributor_user_ids, " +
+        "ARRAY(SELECT DISTINCT user_id FROM ( " +
+        "  SELECT rev_actor AS user_id FROM memo_revision WHERE rev_memo = m.memo_id " +
+        "  UNION " +
+        "  SELECT draft_editor AS user_id FROM memo_draft WHERE draft_memo_id = m.memo_id " +
+        "  UNION " +
+        "  SELECT m.memo_created_user AS user_id " +
+        ") contributors) AS contributor_user_ids, " +
         "CASE " +
         "  WHEN d.draft_updated_timestamp IS NOT NULL AND d.draft_updated_timestamp > COALESCE(r.rev_timestamp, '1970-01-01'::timestamp) " +
         "  THEN d.draft_editor " +
@@ -33,7 +40,7 @@ public interface MemoRepository extends R2dbcRepository<Memo, Long> {
         "  WHEN d.draft_updated_timestamp IS NOT NULL AND d.draft_updated_timestamp > COALESCE(r.rev_timestamp, '1970-01-01'::timestamp) " +
         "  THEN d.draft_content " +
         "  ELSE rc.content_address " +
-        "END AS content";
+        "END AS memo_content";
 
     String COMMON_JOINS =
         "FROM memo m " +

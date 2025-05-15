@@ -8,10 +8,14 @@ import reactor.util.function.Tuples;
 
 import com.wizlit.path.model.ResponseWithChange;
 import com.wizlit.path.model.domain.MemoDto;
+import com.wizlit.path.model.domain.ReserveMemoDto;
 import com.wizlit.path.model.request.EmbedMemoRequest;
-import com.wizlit.path.model.request.MemoRequest;
+import com.wizlit.path.model.request.MemoContentRequest;
+import com.wizlit.path.model.request.MemoTitleRequest;
+import com.wizlit.path.model.request.NewMemoRequest;
 import com.wizlit.path.model.response.FinalResponse;
 import com.wizlit.path.service.MemoService;
+import com.wizlit.path.service.PointService;
 import com.wizlit.path.service.UserService;
 import com.wizlit.path.utils.PrivateAccess;
 import com.wizlit.path.exception.ErrorResponse;
@@ -26,6 +30,7 @@ import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
+import java.util.List;
 
 @RestController
 @RequiredArgsConstructor
@@ -40,6 +45,7 @@ public class MemoController {
     
     private final UserService userService;
     private final MemoService memoService;
+    private final PointService pointService;
 
     @Operation(
         summary = "Create a new embed memo",
@@ -76,13 +82,16 @@ public class MemoController {
         @RequestBody EmbedMemoRequest embedMemoRequest
     ) {
         return userService.getUserByEmailAndCreateIfNotExists(email, name, avatar)
-            .flatMap(user -> memoService.createEmbedMemo(
-                pointId,
-                user,
-                embedMemoRequest.getMemoTitle(),
-                embedMemoRequest.getMemoEmbedContent()
-            ))
-            .map(memoDto -> new FinalResponse().forOnlyMemo(memoDto.getMemoId(), memoDto, null))
+            .flatMap(user ->
+                memoService.createEmbedMemo(
+                    pointId,
+                    user,
+                    embedMemoRequest.getMemoTitle(),
+                    embedMemoRequest.getMemoEmbedContent()
+                )
+                .flatMap(memoDto -> pointService.getPoint(pointId, null)
+                    .map(pointDto -> new FinalResponse().forNewMemo(memoDto.getMemoId(), memoDto, null, pointDto, user)))
+            )
             .switchIfEmpty(Mono.just(new FinalResponse()))
             .map(ResponseWithChange::new)
             .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.CREATED));
@@ -120,23 +129,23 @@ public class MemoController {
         @RequestAttribute("name") String name,
         @RequestAttribute("avatar") String avatar,
         @RequestParam Long pointId,
-        @RequestBody MemoRequest memoRequest,
+        @RequestBody NewMemoRequest newMemoRequest,
         @RequestParam(required = false) Boolean continueEditing
     ) {
         return userService.getUserByEmailAndCreateIfNotExists(email, name, avatar)
             .flatMap(user -> memoService.createMemo(
                 pointId,
                 user,
-                memoRequest.getMemoTitle(),
-                memoRequest.getMemoContent()
+                newMemoRequest.getMemoTitle(),
+                newMemoRequest.getMemoContent()
             ).flatMap(memo -> {
                 if (Boolean.TRUE.equals(continueEditing)) {
                     return memoService.reserveMemo(memo.getMemoId(), user, null)
-                        .map(newReserveCode -> Tuples.of(memo, newReserveCode));
+                        .<Tuple2<MemoDto, ReserveMemoDto>>map(newReserve -> Tuples.of(memo, newReserve));
                 }
-                return Mono.just(Tuples.of(memo, ""));
-            }))
-            .map(tuple -> new FinalResponse().forOnlyMemo(tuple.getT1().getMemoId(), tuple.getT1(), tuple.getT2()))
+                return Mono.just(Tuples.<MemoDto, ReserveMemoDto>of(memo, new ReserveMemoDto()));
+            }).flatMap(tuple -> pointService.getPoint(pointId, null)
+                .map(pointDto -> new FinalResponse().forNewMemo(tuple.getT1().getMemoId(), tuple.getT1(), tuple.getT2(), pointDto, user))))
             .switchIfEmpty(Mono.just(new FinalResponse()))
             .map(ResponseWithChange::new)
             .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.CREATED));
@@ -208,26 +217,60 @@ public class MemoController {
         @RequestAttribute("email") String email,
         @RequestAttribute("name") String name,
         @RequestAttribute("avatar") String avatar,
-        @RequestBody MemoRequest memoRequest,
+        @RequestBody MemoContentRequest memoRequest,
         @RequestParam(required = false) String reserveCode,
         @RequestParam(required = false) Boolean continueEditing
     ) {
         return userService.getUserByEmailAndCreateIfNotExists(email, name, avatar)
-                .flatMap(user -> memoService.updateMemo(
-                    memoId,
-                    user,
-                    memoRequest.getMemoTitle(),
-                    memoRequest.getMemoContent(),
-                    reserveCode
-                ).flatMap(memoDto -> {
-                    if (Boolean.TRUE.equals(continueEditing)) {
-                        return memoService.reserveMemo(memoDto.getMemoId(), user, null)
-                            .map(newReserveCode -> Tuples.of(memoDto, newReserveCode));
-                    }
-                    return Mono.just(Tuples.of(memoDto, ""));
-                }))
-            .map(tuple -> new FinalResponse().forOnlyMemo(memoId, tuple.getT1(), tuple.getT2()))
+            .flatMap(user -> memoService.updateMemo(
+                memoId,
+                user,
+                memoRequest.getMemoContent(),
+                reserveCode
+            ).flatMap(memoDto -> {
+                if (Boolean.TRUE.equals(continueEditing)) {
+                    return memoService.reserveMemo(memoDto.getMemoId(), user, null)
+                        .map(newReserveCode -> Tuples.of(memoDto, user, newReserveCode));
+                }
+                return Mono.just(Tuples.of(memoDto, user, new ReserveMemoDto()));
+            }))
+            .map(tuple -> new FinalResponse().forGetMemo(memoId, tuple.getT1(), List.of(tuple.getT2()), tuple.getT3()))
             .switchIfEmpty(Mono.just(new FinalResponse()))
+            .map(ResponseWithChange::new)
+            .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.OK));
+    }
+
+    @Operation(
+        summary = "Update memo title",
+        description = "Updates the title of a memo"
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Memo title updated successfully"),
+        @ApiResponse(responseCode = "400", description = "Invalid input parameters (ErrorCode: NULL_INPUT, EMPTY)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "401", description = "Unauthorized access (ErrorCode: INVALID_TOKEN, EXPIRED_TOKEN)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "404", description = "Memo not found (ErrorCode: MEMO_NOT_FOUND)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "500", description = "Internal server error (ErrorCode: INTERNAL_SERVER, UNKNOWN)",
+            content = @Content(mediaType = "application/json", 
+                schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping("t/{memoId}/title")
+    @PrivateAccess
+    public Mono<ResponseEntity<ResponseWithChange<FinalResponse>>> updateTitle(
+        @PathVariable Long memoId,
+        @RequestAttribute("email") String email,
+        @RequestAttribute("name") String name,
+        @RequestAttribute("avatar") String avatar,
+        @RequestBody MemoTitleRequest memoTitleRequest
+    ) {
+        return userService.getUserByEmailAndCreateIfNotExists(email, name, avatar)
+            .flatMap(user -> memoService.updateTitle(memoId, memoTitleRequest.getMemoTitle()))
+            .map(memoDto -> new FinalResponse().forOnlyMemo(memoId, memoDto, null))
             .map(ResponseWithChange::new)
             .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.OK));
     }
@@ -259,14 +302,24 @@ public class MemoController {
         @RequestAttribute("name") String name,
         @RequestAttribute("avatar") String avatar,
         @RequestParam(required = false) String reserveCode,
-        @RequestParam(required = false) Long lastFetchTimestamp
+        @RequestParam(required = false) Long lastFetchTimestamp,
+        @RequestParam(required = false) Boolean onlyReserve
     ) {
         Instant updatedAfter = lastFetchTimestamp != null ? Instant.ofEpochMilli(lastFetchTimestamp) : null;
+
+        if (Boolean.TRUE.equals(onlyReserve)) {
+            return userService.getUserByEmailAndCreateIfNotExists(email, name, avatar)
+                .flatMap(user -> memoService.reserveMemo(memoId, user, reserveCode)
+                    .map(newReserveCode -> new FinalResponse().forOnlyMemo(memoId, new MemoDto(), newReserveCode)))
+                .map(ResponseWithChange::new)
+                .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.OK));
+        }
+
         return userService.getUserByEmailAndCreateIfNotExists(email, name, avatar)
             .flatMap(user -> memoService.getMemo(memoId, updatedAfter)
                 .switchIfEmpty(Mono.just(new MemoDto()))
                 .flatMap(memoDto -> memoService.reserveMemo(memoId, user, reserveCode)
-                    .map(newReserveCode -> Tuples.of(memoDto, newReserveCode)))
+                    .<Tuple2<MemoDto, ReserveMemoDto>>map(newReserveCode -> Tuples.of(memoDto, newReserveCode)))
                 .map(tuple -> new FinalResponse().forOnlyMemo(memoId, tuple.getT1(), tuple.getT2()))
                 .switchIfEmpty(Mono.just(new FinalResponse()))
                 .map(ResponseWithChange::new)
@@ -291,7 +344,7 @@ public class MemoController {
     })
     @DeleteMapping("t/{memoId}/reserve")
     @PrivateAccess
-    public Mono<ResponseEntity<Void>> cancelReserve(
+    public Mono<ResponseEntity<ResponseWithChange<Void>>> cancelReserve(
         @PathVariable Long memoId,
         @RequestAttribute("email") String email,
         @RequestAttribute("name") String name,
@@ -300,7 +353,8 @@ public class MemoController {
     ) {
         return userService.getUserByEmailAndCreateIfNotExists(email, name, avatar)
             .flatMap(user -> memoService.cancelReserve(memoId, user, reserveCode))
-            .then(Mono.just(ResponseEntity.ok().build()));
+            .map(ResponseWithChange::new)
+            .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.OK));
     }
     
     @Operation(
@@ -333,5 +387,4 @@ public class MemoController {
     // reorder memo?
 
     // delete memo? (Admin only)
-
 }

@@ -7,7 +7,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.wizlit.path.entity.Memo;
-import com.wizlit.path.entity.MemoContributor;
 import com.wizlit.path.entity.MemoDraft;
 import com.wizlit.path.entity.MemoReserve;
 import com.wizlit.path.entity.MemoRevision;
@@ -15,7 +14,9 @@ import com.wizlit.path.entity.RevisionContent;
 import com.wizlit.path.exception.ApiException;
 import com.wizlit.path.exception.ErrorCode;
 import com.wizlit.path.model.domain.MemoDto;
-import com.wizlit.path.repository.MemoContributorRepository;
+import com.wizlit.path.model.domain.ReserveMemoDto;
+import com.wizlit.path.model.domain.RevisionContentDto;
+import com.wizlit.path.model.domain.MemoRevisionDto;
 import com.wizlit.path.repository.MemoDraftRepository;
 import com.wizlit.path.repository.MemoRepository;
 import com.wizlit.path.repository.MemoReserveRepository;
@@ -48,7 +49,6 @@ public class MemoManager {
     private final MemoRevisionRepository memoRevisionRepository;
     private final RevisionContentRepository revisionContentRepository;
     private final MemoReserveRepository memoReserveRepository;
-    private final MemoContributorRepository memoContributorRepository;
 
     @Value("${app.memo.reserve.expiry-time:900}") // 15 minutes in seconds
     private int LIMIT_RESERVE_EXPIRY_TIME;
@@ -140,6 +140,10 @@ public class MemoManager {
                     new ApiException(ErrorCode.POINT_NOT_FOUND, memo.getMemoPoint()),
                     "foreign", "key", "point"
                 )
+                .containsAllElseError(
+                    new ApiException(ErrorCode.MEMO_TITLE_DUPLICATE, memo.getMemoTitle()),
+                    "duplicate", "key", "unique", "memo_title_key"
+                )
                 .toException());
     }
 
@@ -151,7 +155,7 @@ public class MemoManager {
         return Mono.just(memo);
     }
 
-    private Mono<Memo> _updateTitle(Long memoId, String title) {
+    public Mono<Memo> changeTitle(Long memoId, String title) {
         return findMemoById(memoId)
             .flatMap(memo -> _updateTitle(memo, title));
     }
@@ -200,8 +204,7 @@ public class MemoManager {
     private Mono<MemoReserve> _isAllowedToEdit(Long memoId, Long userId, String reserveCode) {
         return _findReserve(memoId)
             .flatMap(reserve -> {
-                Instant expiryTime = reserve.getReserveTimestamp().plusSeconds(LIMIT_RESERVE_EXPIRY_TIME);
-                if (Instant.now().isBefore(expiryTime) && 
+                if (Instant.now().isBefore(reserve.getReserveExpireTimestamp()) && 
                     (!reserve.getReserveEditor().equals(userId) || 
                      !reserve.getReserveCode().equals(reserveCode))) {
                     return Mono.error(new ApiException(ErrorCode.MEMO_RESERVED, memoId, reserve.getReserveEditor()));
@@ -235,14 +238,15 @@ public class MemoManager {
      * @param currentReserveCode Optional current reserve code to validate against
      * @return A Mono containing the saved MemoReserve, or an error if the save fails
      */
-    public Mono<MemoReserve> createReserve(Long memoId, Long userId, String currentReserveCode) {
-        MemoReserve reserve = new MemoReserve(memoId, userId);
+    public Mono<ReserveMemoDto> createReserve(Long memoId, Long userId, String currentReserveCode) {
+        MemoReserve reserve = new MemoReserve(memoId, userId, LIMIT_RESERVE_EXPIRY_TIME);
 
         return deleteReserve(memoId, userId, currentReserveCode)
             .then(Mono.defer(() -> {
                 return memoReserveRepository.save(reserve.markAsNew())
                     // ← now re-fetch so we get the DB-generated reserveCode
                     .flatMap(saved -> _findReserve(saved.getReserveMemo()))
+                    .map(ReserveMemoDto::from)
                     .onErrorMap(error -> Validator.from(error)
                         .containsAllElseError(
                             new ApiException(ErrorCode.MEMO_NOT_FOUND, memoId),
@@ -254,19 +258,34 @@ public class MemoManager {
     }
 
     /**
-     * Adds a contributor to a memo.
+     * Lists revisions for a given memo ID with pagination and timestamp filtering.
      *
-     * @param memoId The ID of the memo to add the contributor to
-     * @param userId The ID of the user to add as a contributor
-     * @return A Mono containing the saved MemoContributor, or an error if the save fails
+     * @param memoId The ID of the memo to list revisions for
+     * @param beforeRevTimestamp Only return revisions before this timestamp (exclusive), can be null
+     * @param limit Maximum number of revisions to return
+     * @return A Flux containing MemoRevisionDto objects for the revisions of the memo
      */
-    private Mono<MemoContributor> _addContributor(Long memoId, Long userId) {
-        return memoContributorRepository.save(MemoContributor.builder()
-                .memoId(memoId)
-                .userId(userId)
-                .build())
+    public Flux<MemoRevisionDto> listRevision(Long memoId, Instant beforeRevTimestamp, int limit) {
+        if (limit <= 0) {
+            return Flux.empty();
+        }
+
+        Flux<MemoRevision> revisions = beforeRevTimestamp != null
+            ? memoRevisionRepository.findAllByRevMemoAndTimestampBefore(memoId, beforeRevTimestamp, limit)
+            : memoRevisionRepository.findAllByRevMemo(memoId, limit);
+
+        return revisions
             .onErrorMap(error -> Validator.from(error)
-                .toException());
+                .containsAllElseError(
+                    new ApiException(ErrorCode.MEMO_NOT_FOUND, memoId),
+                    "foreign", "key", "memo"
+                )
+                .toException())
+            .map(MemoRevisionDto::from);
+    }
+    
+    public Flux<MemoRevisionDto> listRevision(Long memoId) {
+        return listRevision(memoId, null, 30);
     }
 
     /**
@@ -275,21 +294,29 @@ public class MemoManager {
      * @param memoId The ID of the memo to get the latest revision for
      * @return A Mono containing a Tuple2 of MemoRevision and String, or an error if the retrieval fails
      */
-    private Mono<Tuple2<MemoRevision, String>> _getLatestRevision(Long memoId) {
+    public Mono<RevisionContentDto> getRevisionContent(Long revisionContentId) {
+        return revisionContentRepository.findById(revisionContentId)
+            .onErrorMap(error -> Validator.from(error)
+                .toException())
+            .flatMap(revisionContent -> {
+                if (revisionContent.getContentCompressed()) {
+                     // will get from object storage
+                    return Mono.just(RevisionContentDto.from(revisionContent, null));
+                }
+                return Mono.just(RevisionContentDto.from(revisionContent, revisionContent.getContentAddress()));
+            });
+    }
+
+    private Mono<Tuple2<MemoRevision, RevisionContentDto>> _getLatestRevision(Long memoId) {
         return memoRevisionRepository.findLatestByRevMemo(memoId)
             .onErrorMap(error -> Validator.from(error)
                 .toException())
             .flatMap(latestRevision -> {
                 if (latestRevision == null) {
-                    return Mono.just(Tuples.<MemoRevision, String>of(null, null));
+                    return Mono.empty();
                 }
-                return revisionContentRepository.findById(latestRevision.getRevContent())
-                    .map(revContent -> Tuples.of(
-                        latestRevision,
-                        revContent.getContentCompressed()
-                            ? null // will get from object storage
-                            : revContent.getContentAddress()
-                    ));
+                return getRevisionContent(latestRevision.getRevContent())
+                    .map(revContent -> Tuples.of(latestRevision, revContent));
             });
     }
 
@@ -300,15 +327,11 @@ public class MemoManager {
      * @param draft The draft to apply the revision to
      * @return A Mono containing the updated Memo, or an error if the update fails
      */
-    private Mono<Memo> _applyNewRevision(MemoRevision newRevision, MemoDraft draft) {
+    private Mono<Memo> _applyNewRevision(MemoRevision newRevision) {
         return findMemoById(newRevision.getRevMemo())
             .flatMap(memo -> {
                 memo.setMemoLatestRevision(newRevision.getRevId());
-
-                // Add new contributor if not already present
-                return memoContributorRepository.findByMemoIdAndUserId(newRevision.getRevMemo(), newRevision.getRevActor())
-                    .switchIfEmpty(_addContributor(newRevision.getRevMemo(), newRevision.getRevActor()))
-                    .then(_saveMemo(memo));
+                return _saveMemo(memo);
             });
     }
 
@@ -322,12 +345,11 @@ public class MemoManager {
      */
     private Mono<MemoRevision> _addNewRevision(MemoDraft existingDraft, Long newUserId, boolean force) {
         Long oldUserId = existingDraft.getDraftEditor();
-        String trimmedTitle = existingDraft.getDraftTitle().trim();
         String trimmedContent = existingDraft.getDraftContent().trim();
 
         Boolean isSameUser = oldUserId.equals(newUserId);
         Boolean tooOldDraft = Instant.now().isAfter(existingDraft.getDraftCreatedTimestamp().plusSeconds(LIMIT_DRAFT_STORED_TIME));
-        Boolean emptyContent = trimmedTitle.equals("") && trimmedContent.equals("");
+        Boolean emptyContent = trimmedContent.equals("");
         
         if (!force && isSameUser && !tooOldDraft) {
             return Mono.empty(); // update draft
@@ -338,18 +360,19 @@ public class MemoManager {
         }
 
         return _getLatestRevision(existingDraft.getDraftMemoId())
+            .switchIfEmpty(Mono.just(Tuples.of(new MemoRevision(), new RevisionContentDto())))
             .flatMap(tuple -> {
                 MemoRevision latestRevision = tuple.getT1();
-                String latestRevisionJsonContent = tuple.getT2();
+                RevisionContentDto latestRevisionContent = tuple.getT2();
 
-                Boolean emptyRevision = latestRevision == null;
-                Boolean sameContent = existingDraft.sameJsonAs(latestRevisionJsonContent);
+                Boolean emptyRevision = latestRevision.getRevId() == null;
+                Boolean sameContent = existingDraft.getDraftContent().equals(latestRevisionContent.getContent());
                 
                 // Only create revision if content is different
                 if (emptyRevision || !sameContent) {
                     // First create and save revision content
                     RevisionContent revisionContent = RevisionContent.builder()
-                        .contentAddress(existingDraft.toJson())
+                        .contentAddress(existingDraft.getDraftContent())
                         .build();
         
                     return revisionContentRepository.save(revisionContent)
@@ -371,7 +394,7 @@ public class MemoManager {
                                 .onErrorMap(error -> Validator.from(error)
                                     .toException());
                         })
-                        .flatMap(savedRevision -> _applyNewRevision(savedRevision, existingDraft)
+                        .flatMap(savedRevision -> _applyNewRevision(savedRevision)
                             .thenReturn(savedRevision)); // new draft
                 }
                 return Mono.just(new MemoRevision()); // new draft
@@ -382,7 +405,18 @@ public class MemoManager {
     private Mono<MemoRevision> _addNewRevision(MemoDraft existingDraft, Long newUserId) {
         return _addNewRevision(existingDraft, newUserId, false);
     }
-    
+
+    public Mono<Void> rollbackToRevision(Long memoId, Long userId, Long revisionId, Boolean forced) {
+        // 1. find revision with memoId and revisionId
+        
+        // if forced, delete current draft & remove all the revision after the revisionId & change memo latest revision
+        // else ...
+        // 2. save current draft to revision and delete draft
+        // 3. create new revision marked as revActor = userId, revStartTimestamp = now, revEndTimestamp = now, revMinorEdit = true, revSummary = "reverted", revContent = revision.getRevContent()
+        // 4. change memo latest revision
+        throw new UnsupportedOperationException("Not implemented");
+    }
+
     /**
      * Retrieves a draft for a memo.
      *
@@ -405,8 +439,11 @@ public class MemoManager {
      * @return A Mono containing the saved MemoDraft
      */
     private Mono<MemoDraft> _saveDraft(MemoDraft draft) {
+        if (draft.getDraftContent() != null && draft.getDraftContent().trim().length() < 8) {
+            throw new ApiException(ErrorCode.MIN_LENGTH, "draft_content", 8);
+        }
+
         draft.setDraftUpdatedTimestamp(Instant.now());
-        if (draft.getDraftTitle() != null) draft.setDraftTitle(draft.getDraftTitle().trim());
         if (draft.getDraftContent() != null) draft.setDraftContent(draft.getDraftContent().trim());
 
         return memoDraftRepository.findById(draft.getDraftMemoId())
@@ -421,11 +458,10 @@ public class MemoManager {
                 .toException());
     }
 
-    private Mono<MemoDraft> _saveNewDraft(Long memoId, Long userId, String title, String content) {
+    private Mono<MemoDraft> _saveNewDraft(Long memoId, Long userId, String content) {
         MemoDraft newDraft = MemoDraft.builder()
             .draftMemoId(memoId)
             .draftEditor(userId)
-            .draftTitle(title)
             .draftContent(content)
             .build();
         return _saveDraft(newDraft);
@@ -443,15 +479,13 @@ public class MemoManager {
     public Mono<Tuple2<Memo, MemoDraft>> createEmbedMemo(Long pointId, Long userId, String title, String embedContent) {
         Memo newMemo = new Memo(pointId, title, userId, embedContent);
         return _saveMemo(newMemo)
-            .flatMap(savedMemo -> _addContributor(savedMemo.getMemoId(), userId)
-                .then(Mono.just(savedMemo)))
             .flatMap(savedMemo -> {
                 // Ensure we have the memo ID before creating the draft
                 if (savedMemo.getMemoId() == null) {
                     return Mono.error(new ApiException(ErrorCode.INTERNAL_SERVER, "Failed to get memo ID after save"));
                 }
 
-                return _saveNewDraft(savedMemo.getMemoId(), userId, title, "")
+                return _saveNewDraft(savedMemo.getMemoId(), userId, "")
                     .map(savedDraft -> Tuples.of(savedMemo, savedDraft));
             });
     }
@@ -469,15 +503,13 @@ public class MemoManager {
         Memo newMemo = new Memo(pointId, title, userId);
 
         return _saveMemo(newMemo)
-            .flatMap(savedMemo -> _addContributor(savedMemo.getMemoId(), userId)
-                .then(Mono.just(savedMemo)))
             .flatMap(savedMemo -> {
                 // Ensure we have the memo ID before creating the draft
                 if (savedMemo.getMemoId() == null) {
                     return Mono.error(new ApiException(ErrorCode.INTERNAL_SERVER, "Failed to get memo ID after save"));
                 }
 
-                return _saveNewDraft(savedMemo.getMemoId(), userId, title, content)
+                return _saveNewDraft(savedMemo.getMemoId(), userId, content)
                     .map(savedDraft -> Tuples.of(savedMemo, savedDraft));
             });
     }
@@ -504,7 +536,7 @@ public class MemoManager {
      * @param currentReserveCode The current reserve code to validate against
      * @return A Mono containing the updated MemoDraft, or an error if the update fails
      */
-    public Mono<MemoDraft> updateDraft(Long memoId, Long userId, String title, String content, String currentReserveCode) {
+    public Mono<MemoDraft> updateDraft(Long memoId, Long userId, String content, String currentReserveCode) {
         // Prevent abnormal update where too much content was deleted
         return deleteReserve(memoId, userId, currentReserveCode)
             .then(getDraft(memoId))
@@ -519,15 +551,13 @@ public class MemoManager {
                 
                 return _addNewRevision(existingDraft, userId, isAbnormalUpdate)
                     .flatMap(savedRevision -> _deleteDraft(memoId)
-                        .then(_saveNewDraft(memoId, userId, title, content)))
+                        .then(_saveNewDraft(memoId, userId, content)))
                     .switchIfEmpty(Mono.defer(() -> {
-                        existingDraft.setDraftTitle(title);
                         existingDraft.setDraftContent(content);
-                        return _saveDraft(existingDraft)
-                            .flatMap(draft -> _updateTitle(memoId, title)
-                                .thenReturn(draft));
+                        return _saveDraft(existingDraft);
                     }));
-            });
+            })
+            .switchIfEmpty(_saveNewDraft(memoId, userId, content));
     }
 
 }

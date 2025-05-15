@@ -74,7 +74,7 @@ public class ProjectController {
         return projectService.getProjectById(projectId)
             .flatMap(project -> pointService.listPointsByIds(project.getAllPointIds(), updatedAfter)
                 .collectList()
-                .map(points -> new FinalResponse().forGetProject(project, points)))
+                .map(points -> new FinalResponse().forGetProject(project.getProjectId(), project, points)))
             .switchIfEmpty(Mono.just(new FinalResponse()))
             .map(ResponseWithChange::new)
             .map(response -> response.toResponseEntity(HttpStatus.OK));
