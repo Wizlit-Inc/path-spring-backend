@@ -63,7 +63,7 @@ public class MemoRevisionController {
         @RequestParam(required = false) Long timestampAfter
     ) {
         Instant beforeTimestamp = timestampAfter != null ? Instant.ofEpochMilli(timestampAfter) : null;
-        return memoService.listRevisions(memoId, beforeTimestamp, 30)
+        return memoService.listRevisions(memoId, beforeTimestamp, 100)
             .collectList()
             .flatMap(revisions -> {
                 List<Long> userIds = revisions.stream()
