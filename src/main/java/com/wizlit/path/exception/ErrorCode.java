@@ -54,6 +54,8 @@ public enum ErrorCode {
             "Memo is not an embed memo"),
     ABNORMAL_CONTENT_DELETION(HttpStatus.BAD_REQUEST,
             "Content deletion too large: %s"),
+    MAX_RESERVE_EXCEEDED(HttpStatus.CONFLICT,
+            "Maximum number of active reserves exceeded for user - user: %d / max: %d"),
 
     // user errors
     USER_ALREADY_EXISTS(HttpStatus.BAD_REQUEST,

@@ -56,6 +56,22 @@ public class MemoManager {
     @Value("${app.memo.draft.stored-time:259200}") // 72 hours in seconds
     private int LIMIT_DRAFT_STORED_TIME;
 
+    @Value("${app.memo.max.reserve:5}")
+    private int MAX_RESERVE;
+
+    /**
+     * Counts the number of active reserves for a user.
+     *
+     * @param userId The ID of the user to count reserves for
+     * @return A Mono containing the count of active reserves
+     */
+    private Mono<Long> _countActiveReserves(Long userId) {
+        return memoReserveRepository.findAll()
+            .filter(reserve -> reserve.getReserveEditor().equals(userId) && 
+                             Instant.now().isBefore(reserve.getReserveExpireTimestamp()))
+            .count();
+    }
+
     /**
      * Lists all memos for a given point ID, filtered by an optional timestamp.
      *
@@ -243,17 +259,23 @@ public class MemoManager {
 
         return deleteReserve(memoId, userId, currentReserveCode)
             .then(Mono.defer(() -> {
-                return memoReserveRepository.save(reserve.markAsNew())
-                    // ← now re-fetch so we get the DB-generated reserveCode
-                    .flatMap(saved -> _findReserve(saved.getReserveMemo()))
-                    .map(ReserveMemoDto::from)
-                    .onErrorMap(error -> Validator.from(error)
-                        .containsAllElseError(
-                            new ApiException(ErrorCode.MEMO_NOT_FOUND, memoId),
-                            "foreign", "key", "reserve_memo"
-                        )
-                        .toException()
-                    );
+                return _countActiveReserves(userId)
+                    .flatMap(count -> {
+                        if (count >= MAX_RESERVE) {
+                            return Mono.<ReserveMemoDto>error(new ApiException(ErrorCode.MAX_RESERVE_EXCEEDED, userId, MAX_RESERVE));
+                        }
+                        return memoReserveRepository.save(reserve.markAsNew())
+                            // ← now re-fetch so we get the DB-generated reserveCode
+                            .flatMap(saved -> _findReserve(saved.getReserveMemo()))
+                            .map(ReserveMemoDto::from)
+                            .onErrorMap(error -> Validator.from(error)
+                                .containsAllElseError(
+                                    new ApiException(ErrorCode.MEMO_NOT_FOUND, memoId),
+                                    "foreign", "key", "reserve_memo"
+                                )
+                                .toException()
+                            );
+                    });
             }));
     }
 
@@ -540,7 +562,7 @@ public class MemoManager {
         // Prevent abnormal update where too much content was deleted
         return deleteReserve(memoId, userId, currentReserveCode)
             .then(getDraft(memoId))
-            .flatMap(existingDraft -> {
+            .<MemoDraft>flatMap(existingDraft -> {
                 // Calculate content length difference
                 int oldLength = existingDraft.getDraftContent() != null ? existingDraft.getDraftContent().length() : 0;
                 int newLength = content != null ? content.length() : 0;
@@ -550,9 +572,9 @@ public class MemoManager {
                 boolean isAbnormalUpdate = oldLength > 2000 && lengthDiff > 0 && (double) lengthDiff / oldLength > 0.8;
                 
                 return _addNewRevision(existingDraft, userId, isAbnormalUpdate)
-                    .flatMap(savedRevision -> _deleteDraft(memoId)
+                    .<MemoDraft>flatMap(savedRevision -> _deleteDraft(memoId)
                         .then(_saveNewDraft(memoId, userId, content)))
-                    .switchIfEmpty(Mono.defer(() -> {
+                    .switchIfEmpty(Mono.<MemoDraft>defer(() -> {
                         existingDraft.setDraftContent(content);
                         return _saveDraft(existingDraft);
                     }));

@@ -319,8 +319,11 @@ public class MemoController {
             .flatMap(user -> memoService.getMemo(memoId, updatedAfter)
                 .switchIfEmpty(Mono.just(new MemoDto()))
                 .flatMap(memoDto -> memoService.reserveMemo(memoId, user, reserveCode)
-                    .<Tuple2<MemoDto, ReserveMemoDto>>map(newReserveCode -> Tuples.of(memoDto, newReserveCode)))
-                .map(tuple -> new FinalResponse().forOnlyMemo(memoId, tuple.getT1(), tuple.getT2()))
+                    .map(newReserveCode -> Tuples.of(memoDto, newReserveCode))
+                    .flatMap(tuple -> userService.listUserByUserIds(tuple.getT1().getContributorUserIds(), null)
+                        .collectList()
+                        .map(users -> Tuples.of(tuple.getT1(), users, tuple.getT2()))))
+                .map(tuple -> new FinalResponse().forGetMemo(memoId, tuple.getT1(), tuple.getT2(), tuple.getT3()))
                 .switchIfEmpty(Mono.just(new FinalResponse()))
                 .map(ResponseWithChange::new)
                 .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.OK)));

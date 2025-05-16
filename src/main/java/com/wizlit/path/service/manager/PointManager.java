@@ -72,9 +72,14 @@ public class PointManager {
     }
 
     public Mono<PointDto> getFullPoint(Long pointId, Instant updatedAfter) {
-        return getFullPoints(List.of(pointId), updatedAfter)
-            .next()
-            .switchIfEmpty(Mono.just(new PointDto()));
+        return pointRepository.existsById(pointId)
+            .flatMap(exists -> {
+                if (!exists) {
+                    return Mono.error(new ApiException(ErrorCode.POINT_NOT_FOUND, pointId));
+                }
+                return getFullPoints(List.of(pointId), updatedAfter)
+                    .next();
+            });
     }
 
     /**
@@ -171,8 +176,8 @@ public class PointManager {
                     "delete", "foreign", "key", "memo"
                 )
                 .containsAllElseError(
-                    new ApiException(ErrorCode.POINT_NOT_FOUND, pointId),
-                    "foreign", "key", "point"
+                    new ApiException(ErrorCode.POINT_NOT_DELETABLE, pointId, "point should be empty. move or delete all edges"),
+                    "delete", "foreign", "key", "edge"
                 )
                 .toException());
     }

@@ -52,16 +52,12 @@ INSERT INTO memo (
     memo_point,
     memo_title,
     memo_embed_content,
-    memo_created_timestamp,
-    memo_updated_timestamp,
     memo_created_user
 )
 SELECT
     p.point_id                           AS memo_point,
     'Document for ' || p.point_title     AS memo_title,
     p.document                           AS memo_embed_content,
-    p.point_created_timestamp            AS memo_created_timestamp,
-    p.point_created_timestamp            AS memo_updated_timestamp,
     (SELECT user_id FROM path_user WHERE user_name = 'Admin') AS memo_created_user
 FROM point p
 WHERE p.document IS NOT NULL;
@@ -114,6 +110,12 @@ ALTER TABLE edge
     DROP COLUMN IF EXISTS created_on;
 ALTER TABLE edge
     ADD PRIMARY KEY (origin_point, destination_point);
+ALTER TABLE edge
+    DROP CONSTRAINT IF EXISTS fk_start,
+    DROP CONSTRAINT IF EXISTS fk_end;
+ALTER TABLE edge
+    ADD CONSTRAINT fk_start FOREIGN KEY (origin_point) REFERENCES point(point_id) ON DELETE RESTRICT,
+    ADD CONSTRAINT fk_end FOREIGN KEY (destination_point) REFERENCES point(point_id) ON DELETE RESTRICT;
 CREATE INDEX IF NOT EXISTS idx_edge_destination ON edge(destination_point);
 
 -- 11) Create the `file` table

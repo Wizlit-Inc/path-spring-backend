@@ -72,7 +72,7 @@ public class MemoRevisionController {
                     .toList();
                 return userService.listUserByUserIds(userIds, null)
                     .collectList()
-                    .map(users -> new FinalResponse().forMemoRevisions(memoId, timestampAfter, revisions, users));
+                    .map(users -> new FinalResponse().forMemoRevisions(memoId, revisions, users));
             })
             .map(ResponseWithChange::new)
             .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.OK));
@@ -97,13 +97,12 @@ public class MemoRevisionController {
             content = @Content(mediaType = "application/json", 
                 schema = @Schema(implementation = ErrorResponse.class)))
     })
-    @GetMapping("/{revisionId}")
+    @GetMapping("/content/{revisionContentId}")
     public Mono<ResponseEntity<ResponseWithChange<FinalResponse>>> getRevisionContent(
-        @PathVariable Long memoId,
-        @PathVariable Long revisionId
+        @PathVariable Long revisionContentId
     ) {
-        return memoService.getRevisionContent(revisionId)
-            .map(content -> new FinalResponse().forMemoRevisionContent(revisionId, content))
+        return memoService.getRevisionContent(revisionContentId)
+            .map(content -> new FinalResponse().forMemoRevisionContent(revisionContentId, content))
             .map(ResponseWithChange::new)
             .map(responseWithChange -> responseWithChange.toResponseEntity(HttpStatus.OK));
     }
@@ -112,7 +111,7 @@ public class MemoRevisionController {
         summary = "Rollback to revision",
         description = "Rollback to a specific revision"
     )
-    @PostMapping("/{revisionId}/memo/{memoId}/rollback")
+    @PostMapping("/memo/{memoId}/revision/{revisionId}/rollback")
     @PrivateAccess(role = "admin")
     public Mono<ResponseEntity<ResponseWithChange<FinalResponse>>> rollbackToRevision(
         @PathVariable Long memoId,

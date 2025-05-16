@@ -171,8 +171,8 @@ public class MemoServiceImpl implements MemoService {
     }
 
     @Override
-    public Mono<RevisionContentDto> getRevisionContent(Long revisionId) {
-        return memoManager.getRevisionContent(revisionId);
+    public Mono<RevisionContentDto> getRevisionContent(Long revisionContentId) {
+        return memoManager.getRevisionContent(revisionContentId);
     }
 
     @Override

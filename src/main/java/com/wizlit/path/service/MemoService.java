@@ -23,6 +23,6 @@ public interface MemoService {
     Mono<Void> cancelReserve(Long memoId, UserDto user, String reserveCode);
     Mono<Void> moveMemo(Long memoId, Long newPointId);
     Flux<MemoRevisionDto> listRevisions(Long memoId, Instant beforeTimestamp, int limit);
-    Mono<RevisionContentDto> getRevisionContent(Long revisionId);
+    Mono<RevisionContentDto> getRevisionContent(Long revisionContentId);
     Mono<Void> rollbackToRevision(Long memoId, UserDto user, Long revisionId, Boolean forced);
 }

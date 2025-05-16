@@ -22,19 +22,8 @@ public class FinalResponse {
     private List<MemoDto> memos;
     private List<UserDto> users;
     private List<ReserveMemoDto> reserveMemos;
-    private List<IdDataDto<Long, List<MemoRevisionDto>>> memoRevisions;
+    private List<MemoRevisionDto> memoRevisions;
     private List<RevisionContentDto> memoRevisionContents;
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @Builder
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public static class IdDataDto<A,T> {
-        private Long id;
-        private A additional;
-        private T data;
-    }
 
     public FinalResponse forGetProject(Long currentId, ProjectDto project, List<PointDto> points) {
         this.currentId = currentId;
@@ -87,9 +76,9 @@ public class FinalResponse {
         return this;
     }
 
-    public FinalResponse forMemoRevisions(Long currentId, Long timestampAfter, List<MemoRevisionDto> memoRevisions, List<UserDto> users) {
+    public FinalResponse forMemoRevisions(Long currentId, List<MemoRevisionDto> memoRevisions, List<UserDto> users) {
         this.currentId = currentId;
-        this.memoRevisions = List.of(new IdDataDto<>(currentId, timestampAfter, memoRevisions));
+        this.memoRevisions = memoRevisions;
         this.users = users;
         return this;
     }
