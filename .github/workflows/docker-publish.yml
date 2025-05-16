@@ -32,11 +32,19 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Extract version tag
+        id: extract_version
+        run: |
+          # strip "refs/tags/" then strip leading "v"
+          tag="${GITHUB_REF#refs/tags/}"
+          tag="${tag#v}"
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+      
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name == 'refs/tags/v*' && github.ref_name[11:] || github.ref_name }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.extract_version.outputs.version }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
